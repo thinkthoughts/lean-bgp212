@@ -21,7 +21,7 @@
 \newcommand{\code}[1]{\texttt{#1}}
 \title{Exact Rational Integration over Constrained Simplices\\[4pt]\large Symmetric Polynomial Bases, Marginal Geometry, and Lean 4 Verification}
 \author{Reading Point \texorpdfstring{(\href{https://translatepi.ai/}{translatepi.ai})}{(translatepi.ai)}}
-\date{Draft v0.4 --- 19 October 2026}
+\date{Draft v0.5 --- 19 October 2026}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -30,14 +30,7 @@ simplexes constrained by coordinate thresholds and cardinality-dependent caps.
 The development includes exact simplex moments, a rational polynomial subspace of
  dimension 846, cap-parametric formulas for monomial integrals, rational Gram-entry
  representations, fibre decompositions, and two-aggregate Dirichlet integration.
- Exact polygon-cell formulas now cover all branches of the marginal endpoint,
- yielding a kernel-checked rational value for the first marginal Gram entry
- $J_T[1,1]$ under Table 3 parameters. These statements are formalized in Lean 4
- and supported by independently replayed Comparator suites and boundary controls.
- The constructions arise from a bounded-prime-gap argument, but this manuscript
- studies their integration and polynomial mathematics independently. General
- marginal Gram entries involving power sums, variational positivity, and remaining
- analytic obligations lie outside the completed results.
+ Exact polygon-cell formulas cover all marginal endpoint branches. Kernel-checked rational certificates establish both the constant entry $J_T[1,1]$ and the nonconstant power-sum entry $J_T[P_2,1]$ under Table 3 parameters. A bilinear marginal form and coordinate-placement accounting underpin the new entry. The Lean 4 development passed all 19 Comparator suites on the VPS. These are independent integration results motivated by a bounded-prime-gap argument; the next target is $J_T[P_2,P_2]$ and eventually variational positivity.
 \end{abstract}
 
 \section{Introduction and scope}
@@ -47,8 +40,10 @@ monomial moment formula; the present support also depends on which coordinates c
 threshold and on a cap for the sum of those coordinates. This introduces a finite
 stratification, but preserves a route to exact, rational expressions.
 
-We study the mathematical constructions implemented in the public Lean repository
-\href{https://github.com/thinkthoughts/lean-bgp212}{\code{thinkthoughts/lean-bgp212}}.
+We study the mathematical constructions in the public Lean repository:
+\begin{center}
+\href{https://github.com/thinkthoughts/lean-bgp212}{\nolinkurl{github.com/thinkthoughts/lean-bgp212}}
+\end{center}
 The motivating bounded-prime-gap argument originates with Axiom Math
 \cite{axiom}; the statements below are an independent formalization of specified
 components and do not amount to a complete formal proof of the unconditional
@@ -285,7 +280,7 @@ fibre endpoint as
 The cap index belongs to the stratum $R$. Substituting the translated point's
 rough set $R\cup K$ instead changes the endpoint; the Table~3 control records
 the distinct values $587/1250$ and $461/1250$.
-The cap-branch polygon-cell integration is established in Section~\ref{sec:capcell}; all endpoint branches and the first marginal Gram entry are treated in Section~\ref{sec:v2f}.
+The cap-branch polygon-cell integration is established in Section~\ref{sec:capcell}; all endpoint branches and the constant marginal Gram entry are treated in Section~\ref{sec:v2f}; the power-sum entry follows in Section~\ref{sec:v2g}.
 
 
 \section{Polygon-cell integration and the cap branch}\label{sec:capcell}
@@ -443,12 +438,77 @@ proves the remaining pieces vanish. The exact certificate is regenerated
 byte-for-byte by \code{marginal\_entry\_v2f\_emit.py}.
 Independent polygon clipping, low-dimensional integration, and Monte Carlo
 provide additional checks, but are not substitutes for Lean verification.
-This proves one marginal Gram entry, not the full Gram matrix or a
-positivity certificate.
+This establishes the constant-generator entry. The nonconstant power-sum
+entry is developed in Section~\ref{sec:v2g}.
+
+
+\section{Bilinear marginal form and a power-sum Gram entry (V2g)}\label{sec:v2g}
+Write $P_2(x)=\sum_i x_i^2$, and let $\widehat P_2$ denote the same
+power sum on the first $44$ coordinates. The bilinear marginal functional
+$J_T[P,Q]$ polarizes the squared-fibre integral. Its symmetric bilinearity
+is formalized by \code{jTbil\_self} and \code{jTbil\_comm}.
+
+\begin{proposition}[Fibre polynomial for $P_2$]\label{prop:p2inner}
+For a fibre of length $U$ above $\widehat x$, the constant and quadratic
+polynomial fibre integrals satisfy
+\[
+ \int_0^U 1\,du=U,\qquad
+ \int_0^U P_2(\widehat x,u)\,du
+ =U\widehat P_2(\widehat x)+\frac{U^3}{3}.
+\]
+Consequently the cross-entry is
+\begin{equation}\label{eq:p2cross}
+ J_T[P_2,1]
+ =45\int_{\widehat T}\left(U^2\widehat P_2+\frac{U^4}{3}\right)d\widehat x.
+\end{equation}
+\end{proposition}
+\noindent\textbf{Lean:} \code{inner\_P2}, \code{inner\_one},
+\code{p2Entry\_eq}; \nolinkurl{Solution/PowerSumEntry.lean}.
+
+\paragraph{Coordinate placements.}
+On a translated stratum $x=y+g\mathbf1_{R\cup K}$, the power sum becomes
+\[
+ \widehat P_2(x)=\sum_i y_i^2
+   +2g\sum_{i\in R\cup K}y_i+g^2|R\cup K|.
+\]
+One distinguished coordinate lies in $R$, in $K$, or in neither;
+these cases carry multiplicities $r$, $k$, and $N-r-k$.
+The resulting exponent shifts feed the exact two-aggregate Dirichlet
+weights and polygon-cell formulas established earlier.
+Theorems \code{piece\_single}, \code{piece\_single\_eq},
+\code{sum\_place}, and \code{piece\_P2} establish the piecewise and
+cardinality-weighted assembly, including the necessary boundary cases.
+
+\begin{proposition}[Table 3 nonconstant marginal certificate]\label{prop:p2cert}
+Under the Table 3 parameters, the marginal Gram cross-entry has an exact
+rational value $q_{P_2,1}\in\Q$, certified in Lean, with
+\[
+ J_T[P_2,1]=q_{P_2,1}
+ \approx 4.999439687639965\times10^{-57}.
+\]
+The complete numerator and denominator are preserved by the Lean
+certificate and the reproducible certificate generator.
+\end{proposition}
+\noindent\textbf{Lean:} \code{p2EntryVal\_table3},
+\code{jT\_P2\_one\_table3}, \code{jT\_one\_P2\_table3}.\par
+\noindent\textit{Sources:} \nolinkurl{Solution/PowerSumEntry.lean},
+\nolinkurl{Solution/PowerSumEntryCert.lean}.
+
+The exact Table 3 evaluation uses 133 cardinality-class pieces with two
+certificate lemmas per piece (266 lemmas total); the remaining classes
+are eliminated by \code{cond\_tail} and \code{cond\_high}.
+The generator \code{specs/checks/power\_sum\_entry\_v2g\_emit.py}
+reproduces the Lean certificate byte-for-byte on the VPS.
+Six independent Lean-file controls have their expected outcomes: two
+accepted positive controls and four rejected negative controls.
+Numerical cross-checks include a low-dimensional grid and Monte Carlo;
+these support the arithmetic independently of the exact kernel proof.
+The next polynomial cross-entry is $J_T[P_2,P_2]$, requiring two
+distinguished-coordinate placements and a diagonal case.
 
 \section{Verification, limitations, and further mathematics}
 The project uses Lean \code{v4.34.0-rc2} and a pinned Mathlib revision
-\code{85e3a25}. At the V2f baseline, all 18 Comparator suites were independently
+\code{85e3a25}. At the V2g baseline, all 19 Comparator suites were independently
 accepted on the VPS. Four positive V2d controls were accepted; four intentionally
 incorrect controls were rejected with unsolved goals. The V2d proof commit is
 \code{52fd36a}; its published verification record is commit
@@ -467,13 +527,19 @@ controls rejected. Its proof commit is
 \href{https://github.com/thinkthoughts/lean-bgp212/commit/8c50fb6}{\code{8c50fb6}},
 with VPS provenance commit
 \href{https://github.com/thinkthoughts/lean-bgp212/commit/da0c3fd}{\code{da0c3fd}}.
+For V2g, two positive controls were accepted and four negative controls
+rejected; its 266 certificate lemmas regenerated byte-identically on the
+VPS. The V2g proof commit is
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/ad70abb}{\code{ad70abb}},
+with verification/provenance commit
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/12f8b16}{\code{12f8b16}}.
 The reported kernel axioms for these developments are
 \code{propext}, \code{Quot.sound}, and \code{Classical.choice}.
 Results and verification scripts are available in
 \href{https://github.com/thinkthoughts/lean-bgp212/tree/main/specs/results}{\code{specs/results}}.
 
-Further work is needed for marginal $\JT$ Gram entries containing
-power-sum factors and their general rational evaluation,
+Further work begins with $J_T[P_2,P_2]$ and extends to general
+power-sum marginal Gram entries and their exact rational evaluation,
 optimized polynomial coefficients, exact variational positivity certificates, and
 remaining analytic hypotheses. The existing Lean development formalizes the
 \emph{conditional} implication $\mathrm{DHL}[45,2]\Rightarrow H_1\le212$;
