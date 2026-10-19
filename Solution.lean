@@ -19,3 +19,5 @@ import Solution.Aggregate
 import Solution.CapCell
 import Solution.MarginalEntryCert
 import Solution.MarginalEntry
+import Solution.PowerSumEntryCert
+import Solution.PowerSumEntry

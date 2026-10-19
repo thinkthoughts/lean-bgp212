@@ -280,6 +280,21 @@ branches and the first marginal Gram entry `J_T[1, 1]`**.
   `J_T[1, 1] = 45 ∫_{T̂} U(x̂)² dx̂ ≈ 1.11935 × 10⁻⁵⁵`, an explicit rational, in V2d's `J_T` form and
   in Definition 4.6's marginal form.
 
+The nineteenth pair is V2g (`Challenge/PowerSumEntry.lean`, `Solution/PowerSumEntry.lean`,
+`Solution/PowerSumEntryCert.lean`, objects in `BGP212/PowerSumEntry.lean`): **a marginal Gram entry
+with a power sum, `J_T[P₂, 1]`**.
+
+- `jTbil`: the bilinear form `J_T[F, G] = (n + 1) ∫_{T̂} (∫₀^U F)(∫₀^U G)` (`jTbil_self`,
+  `jTbil_comm`); `inner_P2`: `∫₀^U P₂ = U P̂₂ + U³/3` for `P₂ = gen 0 {2}`.
+- `strat_integral`: V2b's stratified decomposition for any stratum-dependent continuous integrand.
+- `piece_single`, `piece_r0_w`, `piece_single_eq`: a single-coordinate weight `yᵢ^e` raises the
+  Dirichlet exponent of the group containing `i` by `e` (`pieceE`); `sum_place` places the
+  distinguished coordinate in `R`, in `K` or in neither (multiplicities `r`, `k`, `N − r − k`).
+- `piece_P2`, `p2Entry_eq`: `(N + 1) ∫_{T̂} (U P̂₂ + U³/3) U = p2EntryVal N g L τ C` for every
+  `N ≥ 1` and data with `0 ≤ g ≤ C(1)`, `C(N) < N g`, after expanding `P̂₂(y + g·1_{R∪K})`.
+- `jT_P2_one_table3` (computational certificate `p2EntryVal_table3`, 266 kernel-evaluated piece
+  lemmas): `J_T[P₂, 1] = 45 ∫_{T̂} (U² P̂₂ + U⁴/3) ≈ 4.99944 × 10⁻⁵⁷` at Table 3, an explicit rational.
+
 ## What is proved, imported, and external
 
 - **Proved here, kernel-checked:** Lemma 12.1; the Table 3 parameter layer and every
@@ -293,7 +308,8 @@ branches and the first marginal Gram entry `J_T[1, 1]`**.
   (V2c); the `J_T` fibre theorem of Lemma 9.2 and the marginal identity `J_T(1_{T̃} P) = J_T(P)` (V2d);
   two-aggregate Dirichlet integration and the aggregate form of Lemma 9.2's endpoint (V2e-A);
   exact polygon-cell integrals of the cap branch and one Table 3 cap-branch certificate (V2e-B);
-  all three endpoint branches and the marginal Gram entry `J_T[1, 1]` at Table 3 (V2f).
+  all three endpoint branches and the marginal Gram entry `J_T[1, 1]` at Table 3 (V2f); the bilinear
+  `J_T` form, single-coordinate placement, and the power-sum entry `J_T[P₂, 1]` at Table 3 (V2g).
 - **Imported analytic hypotheses (taken as hypotheses in Axiom's certificate too):** the
   Type I/II/III equidistribution estimates (Lemmas 5.3–5.7), bilinear Bombieri–Vinogradov
   (Lemma 8.1), and the Harman decomposition (Proposition 7.2). In A4 these are the named
@@ -413,6 +429,15 @@ python3 -I specs/checks/marginal_entry_v2f_emit.py /tmp/MarginalEntryCert.lean
 cmp /tmp/MarginalEntryCert.lean Solution/MarginalEntryCert.lean
 python3 -I specs/checks/marginal_entry_v2f_controls.py /tmp/v2f_ctl
 for f in /tmp/v2f_ctl/*.lean; do lake env lean "$f" >/dev/null 2>&1 && echo "$f accepted" || echo "$f rejected"; done
+```
+
+For V2g's certificate and controls:
+
+```text
+python3 -I specs/checks/power_sum_entry_v2g_emit.py /tmp/PowerSumEntryCert.lean
+cmp /tmp/PowerSumEntryCert.lean Solution/PowerSumEntryCert.lean
+python3 -I specs/checks/power_sum_entry_v2g_controls.py /tmp/v2g_ctl
+for f in /tmp/v2g_ctl/*.lean; do lake env lean "$f" >/dev/null 2>&1 && echo "$f accepted" || echo "$f rejected"; done
 ```
 
 `./verify.sh` builds the project and runs Lean Comparator on each config in `Comparator/`.

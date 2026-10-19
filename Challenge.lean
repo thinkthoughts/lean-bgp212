@@ -16,3 +16,4 @@ import Challenge.Fibre
 import Challenge.Aggregate
 import Challenge.CapCell
 import Challenge.MarginalEntry
+import Challenge.PowerSumEntry

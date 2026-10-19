@@ -17,3 +17,4 @@ import BGP212.Fibre
 import BGP212.Aggregate
 import BGP212.CapCell
 import BGP212.MarginalEntry
+import BGP212.PowerSumEntry

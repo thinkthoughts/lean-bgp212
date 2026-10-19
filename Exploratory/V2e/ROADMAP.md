@@ -4,7 +4,8 @@ Status:
 - **V2e-A is proved** (sixteenth pair, `Solution/Aggregate.lean`).
 - **V2e-B is proved** (seventeenth pair, `Solution/CapCell.lean`): the cap branch, see §3.
 - **V2f is proved** (eighteenth pair, `Solution/MarginalEntry.lean`): all branches and the first marginal Gram entry `J_T[1, 1]`, see §4.
-- This file is the plan for the remaining `J_T` entries and certificates (§6).
+- **V2g is proved** (nineteenth pair, `Solution/PowerSumEntry.lean`): the bilinear `J_T` form, single-coordinate placement, and the power-sum entry `J_T[P₂, 1]`, see §6.
+- This file is the plan for the remaining `J_T` entries and certificates (§7).
 - Statements marked *exploratory* were checked numerically, not in the kernel.
 
 ## 1. What V2e-A provides (kernel-checked)
@@ -161,14 +162,67 @@ Each set difference is an exact `setIntegral_sdiff`.
   - `Solution/MarginalEntry.lean` elaborates in seconds.
   - The certificate `Solution/MarginalEntryCert.lean` (133 piece lemmas) is described in `specs/results/V2f_marginal_entry.yaml`.
 
-## 6. After V2f: the remaining `J_T` entries
+## 6. V2g: the power-sum entry `J_T[P₂, 1]` (done)
 
-1. **Generators with power sums.** For `F = (L − S − u)^a ∏_q (P̂_q + u^q)`:
-   - `inner_integral` gives `∫₀^U F` as a polynomial in `U`, `L − S` and the power sums of `x̂`;
-   - each product of two such terms expands into monomials `yᵗ` times blocks `U^m (L − S)^n`.
+**The bilinear form.** `jTbil` is `J_T[F, G] = (n + 1) ∫_{T̂} (∫₀^U F)(∫₀^U G)`.
+- `jTbil_self`: `J_T(F) = J_T[F, F]`.
+- `jTbil_comm`: the form is symmetric.
+- For `P₂ = gen 0 {2}`, `∫₀^U P₂ = U P̂₂ + U³/3` (`inner_P2`), so `J_T[P₂, 1] = 45 ∫_{T̂} (U² P̂₂ + U⁴/3)`.
 
-   `piece_block` already accepts any `yᵗ` and any block. What is new is the expansion of the power sums after the translation, together with V2c's placement counting over the distinguished coordinates (`Sig`, `sig_union`, `sig_card`).
-2. **Certificate cost.**
-   - One symmetric entry costs about 133 piece evaluations at a few seconds each.
-   - Entries with `d` distinguished coordinates multiply this by about `3^d` placements, the same scaling as V2c's `I_T` certificate.
-   - Certifying `J_T(P⋆) − 4 I_T(P⋆)` directly, with symmetry-collapsed placements, remains the route to Theorem 11.1. The 846 × 846 matrices stay uncertified.
+**Power sums after the translation.** On a piece:
+
+```text
+P̂₂(y + g·1_{R∪K}) = Σᵢ yᵢ² + 2 g Σ_{i ∈ R∪K} yᵢ + g² |R ∪ K|
+```
+
+- **Single-coordinate weights.** A weight `yᵢ^e` raises the Dirichlet exponent of the group containing `i` by `e`, and multiplies that group's constant by `e!` (`piece_single`, `piece_r0_w`, `pieceE`).
+- **Placement.** Summing over `i` places the distinguished coordinate in `R`, in `K` or in neither, with multiplicities `r`, `k` and `N − r − k` (`sum_place`). This is V2b's `count_pieces` pattern, for one distinguished coordinate.
+- **Closed form.** `p2Entry_eq` gives the result for any `N ≥ 1` and admissible data.
+
+**Certificate.**
+- 266 piece lemmas (`p2J` and `pieceJ … 4 0` for each of the 133 pieces).
+- The build takes 2 286 s, peaking at 5.22 GB.
+- `J_T[P₂, 1] ≈ 4.99944 × 10⁻⁵⁷`.
+
+**Independent checks (exploratory).**
+- Monte Carlo at `N = 44`: z = −0.29 and 0.27 in two runs.
+- Synthetic `N = 3` grid: 0.54%.
+
+**Finding (exploratory).** The shift terms nearly cancel:
+- the `R`-shift contributes +35.8%;
+- the `K`-shift contributes −35.8%;
+- their sum is −1.7 × 10⁻¹² of the entry.
+
+The inclusion–exclusion therefore carries cancellation to about twelve digits, so certificates must stay in exact arithmetic. Whether an exact identity lies behind the near-cancellation is open.
+
+## 7. Cost of the full marginal Gram computation (exploratory model, calibrated)
+
+**Measured.**
+- `J_T[1, 1]` costs one `cellsVal` per piece: about 2.4 s; 324 s in total.
+- `J_T[P₂, 1]` costs six `cellsVal` per piece: about 17 s; 2 286 s in total.
+- A single `boxVal` with exponents up to about 90 costs 0.4–0.9 s of kernel time above the import baseline.
+
+**Why the cost is driven by moments.** Every `J_T` entry, after the power-sum expansion and the placement of coordinates, is a rational combination of per-piece moments `cellsVal(α + A, β + B, m, n)`. Here:
+- `A` and `B` are the coordinate degrees landing in the rough and the smooth group;
+- `m` and `n` are the powers of `U` and `L − S`.
+
+For `B₂₁` (`a + |λ| ≤ 21`), the moments satisfy `A + B ≤ 40`, `m ≥ 2` and `A + B + m + n ≤ 44`. That gives up to 163 016 distinct moments per piece.
+
+**Entry by entry.** All 846 × 847 / 2 entries need about 2.2 × 10⁷ moment certificates. That is 250–600 kernel-days: not a practical route.
+
+**`J_T(P⋆)` directly.** On each cell `U` is affine, so the whole weighted integrand `Σ cᵢ cⱼ (∫Fᵢ)(∫Fⱼ)` collapses to one bivariate polynomial in `(u₁, u₂)`:
+- its extra degree is at most 44, so at most 1 035 monomials;
+- there are 5 distinct `boxTri` cells per piece, so about 5 175 `boxVal` evaluations per piece;
+- over 133 pieces that is about 6.9 × 10⁵ evaluations, about 4–7 kernel-days single-threaded.
+
+The pieces are independent lemmas, so the work parallelizes on the VPS.
+
+**What that route still needs, besides the arithmetic.**
+1. A general placement theorem for products of power sums. This means V2c's set partitions of the parts, each block placed in `R`, `K` or the rest, with falling-factorial multiplicities.
+2. A kernel-computed reduction from `P⋆`'s 846 coefficients to the per-cell polynomial coefficients.
+
+## 8. After V2g
+
+1. **Products of two power sums**, for example `J_T[P₂, P₂]`. This needs two distinguished coordinates and the diagonal `i = j`. Here V2c's `Sig`, `sig_union` and `sig_card` placements enter, generalizing `sum_place`.
+2. **The general generator `(L − P₁)^a P_λ`.** `inner_integral` handles `(M − u)^a`. The new parts are the subset expansion of `∏ (P̂_q + u^q)` and the set-partition placement.
+3. **The collapsed per-cell certificate for `J_T(P⋆) − 4 I_T(P⋆)`**, following §7.
