@@ -91,7 +91,7 @@ result:
     - "Your solution is okay!"
   verify_time: "about 2 387 seconds for the V2g comparator suite in the build container"
   run_date: 2026-10-19
-  commit_hash: PENDING_VPS
+  commit_hash: ad70abb
 
 next_development:
   two_power_sums: "J_T[P₂, P₂]: two distinguished coordinates and the diagonal; V2c's Sig placements generalize sum_place"
