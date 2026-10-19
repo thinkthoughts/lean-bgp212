@@ -2,7 +2,7 @@
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
-\usepackage[a4paper,margin=27mm]{geometry}
+\usepackage[a4paper,margin=25mm]{geometry}
 \usepackage{amsmath,amssymb,amsthm,mathtools}
 \usepackage{microtype}
 \usepackage{xcolor,hyperref}
@@ -21,21 +21,23 @@
 \newcommand{\code}[1]{\texttt{#1}}
 \title{Exact Rational Integration over Constrained Simplices\\[4pt]\large Symmetric Polynomial Bases, Marginal Geometry, and Lean 4 Verification}
 \author{Reading Point \texorpdfstring{(\href{https://translatepi.ai/}{translatepi.ai})}{(translatepi.ai)}}
-\date{Draft v0.3 --- 19 October 2026}
+\date{Draft v0.4 --- 19 October 2026}
 \begin{document}
 \maketitle
 \begin{abstract}
 We present a formalized collection of integration identities for polynomial weights on
 simplexes constrained by coordinate thresholds and cardinality-dependent caps.
 The development includes exact simplex moments, a rational polynomial subspace of
-dimension 846, cap-parametric formulas for arbitrary monomial integrals, explicit rational
-representations of associated Gram entries, a fibre decomposition for marginal
-functionals, and a two-aggregate Dirichlet integration theorem reducing weighted
-high-dimensional simplex integrals to integrals over a triangle, and exact rational polynomial integration over truncated rectangular cells for the cap branch of the marginal endpoint. These statements are formalized in Lean 4 and are supported by independently
-replayed Comparator suites and boundary controls. The construction arose in the analysis
-of a bounded-prime-gap argument, but this manuscript concerns the integration and
-polynomial mathematics in its own right. General marginal Gram evaluations and the
-remaining variational and analytic obligations lie outside the completed results.
+ dimension 846, cap-parametric formulas for monomial integrals, rational Gram-entry
+ representations, fibre decompositions, and two-aggregate Dirichlet integration.
+ Exact polygon-cell formulas now cover all branches of the marginal endpoint,
+ yielding a kernel-checked rational value for the first marginal Gram entry
+ $J_T[1,1]$ under Table 3 parameters. These statements are formalized in Lean 4
+ and supported by independently replayed Comparator suites and boundary controls.
+ The constructions arise from a bounded-prime-gap argument, but this manuscript
+ studies their integration and polynomial mathematics independently. General
+ marginal Gram entries involving power sums, variational positivity, and remaining
+ analytic obligations lie outside the completed results.
 \end{abstract}
 
 \section{Introduction and scope}
@@ -283,7 +285,7 @@ fibre endpoint as
 The cap index belongs to the stratum $R$. Substituting the translated point's
 rough set $R\cup K$ instead changes the endpoint; the Table~3 control records
 the distinct values $587/1250$ and $461/1250$.
-The cap-branch polygon-cell integration is established in Section~\ref{sec:capcell}; the other endpoint branches and general $J_T$ Gram entries remain outstanding.
+The cap-branch polygon-cell integration is established in Section~\ref{sec:capcell}; all endpoint branches and the first marginal Gram entry are treated in Section~\ref{sec:v2f}.
 
 
 \section{Polygon-cell integration and the cap branch}\label{sec:capcell}
@@ -355,10 +357,98 @@ inclusion--exclusion decomposition, not the complete value of $J_T(1)$.
 The exact rational certificate is kernel-checked. Polygon clipping and
 lower-dimensional integration provide independent numerical controls;
 the latter is an approximation, not part of the kernel proof.
+The remaining branches and their assembly are treated in Section~\ref{sec:v2f}.
+
+\section{All endpoint branches and the first marginal Gram entry}\label{sec:v2f}
+The translated marginal endpoint is the minimum of the remaining total mass
+and the maximum of a cap expression and $g$:
+\[
+ U=\min\bigl(L-(r+k)g-u_1-u_2,\;
+       \max(g,C(r+1)-rg-u_1)\bigr).
+\]
+Its switching lines partition each two-aggregate piece into four cells:
+the cap branch, the remaining-mass branch on the cap side, the constant
+$g$ branch, and the remaining-mass branch on the $g$ side. Each cell
+is represented by signed differences of the clipped polygon cells
+$\mathcal B(A,B,D)$ in Section~\ref{sec:capcell}.
+
+\begin{theorem}[Exact branch-cell and piece integrals]\label{thm:allbranches}
+For nonnegative integer exponents, the weighted integral on each branch cell
+of a polynomial block
+\[
+ u_1^\alpha u_2^\beta (p-u_1)^{m_1}
+ (L'-u_1-u_2)^{m_2}
+\]
+reduces to a finite combination of exact clipped-cell moments. The
+corresponding integrals on translated rough-set strata admit closed forms,
+including the stratum with no rough coordinates. For integrands depending
+on the stratum, inclusion--exclusion and cardinality counting assemble
+these pieces into the marginal functional.
+\end{theorem}
+\noindent\textbf{Lean:} \code{box\_twoPow}, \code{cells\_integral},
+\code{piece\_block}, \code{piece\_r0},
+\code{indicator\_supportT\_strat}, \code{count\_by\_card};
+\nolinkurl{Solution/MarginalEntry.lean}.
+
+\begin{theorem}[Rational reduction of the constant-generator marginal]\label{thm:jtone}
+For $N\ge1$ and parameters satisfying $0\le g\le C(1)$ and
+$C(N)<Ng$, the squared-fibre marginal for the constant polynomial is
+expressed by the explicit rational-piece expression $\operatorname{jtSum}$:
+\[
+ J_T(1)=(N+1)\int_{\widehat T}U(\widehat x)^2\,d\widehat x
+ =\operatorname{jtSum}(N,g,L,\tau,C,2,0).
+\]
+\end{theorem}
+\noindent\textbf{Lean:} \code{jT\_one\_eq},
+\code{jT\_one\_pieces}, \code{piece\_eq\_pieceJ};
+\nolinkurl{Solution/MarginalEntry.lean}. The reduction uses binomial
+counting for this symmetric integrand; entries with power-sum factors
+require additional expansion and placement accounting.
+
+\begin{proposition}[Table 3 marginal Gram certificate]\label{prop:jtcert}
+Under the Table 3 parameters, for the generator $G_{0,\varnothing}=1$,
+\[
+ J_T[G_{0,\varnothing},G_{0,\varnothing}]
+ =45\int_{\widehat T}U(\widehat x)^2\,d\widehat x
+ \approx 1.1193487646397893\times10^{-55}.
+\]
+The exact value is the ratio of these integers, obtained by concatenating each
+integer's digit lines (no separators):
+\begin{center}
+\small
+\begin{tabular}{@{}l@{}}
+\textbf{Numerator}\\
+\ttfamily
+196405301342598493830210603911544843582810204\\
+587055080769623409436245894353192939488221872\\
+912132381844932553462651053065161718578698716\\
+871038141\\[4pt]
+\textbf{Denominator}\\
+\ttfamily
+175463901463993193504011955433551437477604239\\
+482178113383469748717206470461915657210738572\\
+757691144943237304687500000000000000000000000\\
+000000000000000000000000000000000000000000000\\
+0000000000000
+\end{tabular}
+\end{center}
+\end{proposition}
+\noindent\textbf{Lean:} \code{jtSum\_table3},
+\code{jT\_one\_table3}, \code{eval\_gen\_zero},
+\code{jT\_gram\_gen00\_table3};
+\nolinkurl{Solution/MarginalEntryCert.lean},
+\nolinkurl{Solution/MarginalEntry.lean}.
+The proof evaluates 133 nonempty $(r,k)$ pieces by kernel checking and
+proves the remaining pieces vanish. The exact certificate is regenerated
+byte-for-byte by \code{marginal\_entry\_v2f\_emit.py}.
+Independent polygon clipping, low-dimensional integration, and Monte Carlo
+provide additional checks, but are not substitutes for Lean verification.
+This proves one marginal Gram entry, not the full Gram matrix or a
+positivity certificate.
 
 \section{Verification, limitations, and further mathematics}
 The project uses Lean \code{v4.34.0-rc2} and a pinned Mathlib revision
-\code{85e3a25}. At the V2e-B baseline, all 17 Comparator suites were independently
+\code{85e3a25}. At the V2f baseline, all 18 Comparator suites were independently
 accepted on the VPS. Four positive V2d controls were accepted; four intentionally
 incorrect controls were rejected with unsolved goals. The V2d proof commit is
 \code{52fd36a}; its published verification record is commit
@@ -372,13 +462,18 @@ incorrect controls rejected; the V2e-B proof commit is
 \href{https://github.com/thinkthoughts/lean-bgp212/commit/6a21780}{\code{6a21780}},
 with verification/provenance commit
 \href{https://github.com/thinkthoughts/lean-bgp212/commit/25a7376}{\code{25a7376}}.
+For V2f, four positive Lean-file controls were accepted and five negative
+controls rejected. Its proof commit is
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/8c50fb6}{\code{8c50fb6}},
+with VPS provenance commit
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/da0c3fd}{\code{da0c3fd}}.
 The reported kernel axioms for these developments are
 \code{propext}, \code{Quot.sound}, and \code{Classical.choice}.
 Results and verification scripts are available in
 \href{https://github.com/thinkthoughts/lean-bgp212/tree/main/specs/results}{\code{specs/results}}.
 
-Further work is needed for the remaining $g$ and $L-S$ branches of
-the marginal endpoint, general $\JT$ Gram evaluations,
+Further work is needed for marginal $\JT$ Gram entries containing
+power-sum factors and their general rational evaluation,
 optimized polynomial coefficients, exact variational positivity certificates, and
 remaining analytic hypotheses. The existing Lean development formalizes the
 \emph{conditional} implication $\mathrm{DHL}[45,2]\Rightarrow H_1\le212$;
