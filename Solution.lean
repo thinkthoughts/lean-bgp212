@@ -17,3 +17,5 @@ import Solution.GramGeneral
 import Solution.Fibre
 import Solution.Aggregate
 import Solution.CapCell
+import Solution.MarginalEntryCert
+import Solution.MarginalEntry

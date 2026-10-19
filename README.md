@@ -262,6 +262,24 @@ The seventeenth pair is V2e-B (`Challenge/CapCell.lean`, `Solution/CapCell.lean`
 - `capPieceT3_value` (computational certificate): the cap-branch part of `J_T(1)` on the Table 3
   piece `({0}, ∅)` of `T̂` is `(L − C(2))⁴³ ((C(2) − g)³ − g³) / (3 · 43!) ≈ 1.0464 × 10⁻⁷⁰`.
 
+The eighteenth pair is V2f (`Challenge/MarginalEntry.lean`, `Solution/MarginalEntry.lean`,
+`Solution/MarginalEntryCert.lean`, objects in `BGP212/MarginalEntry.lean`): **all three endpoint
+branches and the first marginal Gram entry `J_T[1, 1]`**.
+
+- `cells_integral`: on a piece region the block `u₁^α u₂^β U^m (L − S)^n` integrates exactly over
+  the four branch cells (cap; `L − S` on the cap side; `g`; `L − S` on the `g` side), each a signed
+  combination of V2e-B's `boxTri` cells (`box_twoPow`, `cellsVal`).
+- `piece_block`, `piece_r0`: every piece integral in closed form (two aggregates; one aggregate for
+  the stratum `R = ∅`).
+- `indicator_supportT_strat`, `jT_one_pieces`: V2b's inclusion–exclusion with a stratum-dependent
+  integrand, so the rough-set-dependent endpoint of Lemma 9.2 is integrated exactly.
+- `jT_one_eq`: `J_T(1) = jtSum N g L τ C 2 0` for every `N ≥ 1` and data with `0 ≤ g ≤ C(1)`,
+  `C(N) < N g`; the count over pieces is binomial (`count_by_card`).
+- `jT_gram_gen00_table3` (computational certificate `jtSum_table3`, 133 kernel-evaluated pieces):
+  at Table 3 the marginal Gram entry of the generator `gen 0 ∅ = 1` is
+  `J_T[1, 1] = 45 ∫_{T̂} U(x̂)² dx̂ ≈ 1.11935 × 10⁻⁵⁵`, an explicit rational, in V2d's `J_T` form and
+  in Definition 4.6's marginal form.
+
 ## What is proved, imported, and external
 
 - **Proved here, kernel-checked:** Lemma 12.1; the Table 3 parameter layer and every
@@ -274,7 +292,8 @@ The seventeenth pair is V2e-B (`Challenge/CapCell.lean`, `Solution/CapCell.lean`
   integral over the support in closed form, and every `I_T` entry of `B₂₁` as an explicit rational
   (V2c); the `J_T` fibre theorem of Lemma 9.2 and the marginal identity `J_T(1_{T̃} P) = J_T(P)` (V2d);
   two-aggregate Dirichlet integration and the aggregate form of Lemma 9.2's endpoint (V2e-A);
-  exact polygon-cell integrals of the cap branch and one Table 3 cap-branch certificate (V2e-B).
+  exact polygon-cell integrals of the cap branch and one Table 3 cap-branch certificate (V2e-B);
+  all three endpoint branches and the marginal Gram entry `J_T[1, 1]` at Table 3 (V2f).
 - **Imported analytic hypotheses (taken as hypotheses in Axiom's certificate too):** the
   Type I/II/III equidistribution estimates (Lemmas 5.3–5.7), bilinear Bombieri–Vinogradov
   (Lemma 8.1), and the Harman decomposition (Proposition 7.2). In A4 these are the named
@@ -385,6 +404,15 @@ For V2e-B's controls:
 ```text
 python3 -I specs/checks/capcell_v2eb_controls.py /tmp/v2eb_ctl
 for f in /tmp/v2eb_ctl/*.lean; do lake env lean "$f" >/dev/null 2>&1 && echo "$f accepted" || echo "$f rejected"; done
+```
+
+For V2f's certificate and controls:
+
+```text
+python3 -I specs/checks/marginal_entry_v2f_emit.py /tmp/MarginalEntryCert.lean
+cmp /tmp/MarginalEntryCert.lean Solution/MarginalEntryCert.lean
+python3 -I specs/checks/marginal_entry_v2f_controls.py /tmp/v2f_ctl
+for f in /tmp/v2f_ctl/*.lean; do lake env lean "$f" >/dev/null 2>&1 && echo "$f accepted" || echo "$f rejected"; done
 ```
 
 `./verify.sh` builds the project and runs Lean Comparator on each config in `Comparator/`.

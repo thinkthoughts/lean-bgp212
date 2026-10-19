@@ -3,7 +3,8 @@
 Status:
 - **V2e-A is proved** (sixteenth pair, `Solution/Aggregate.lean`).
 - **V2e-B is proved** (seventeenth pair, `Solution/CapCell.lean`): the cap branch, see §3.
-- This file is the plan for V2f.
+- **V2f is proved** (eighteenth pair, `Solution/MarginalEntry.lean`): all branches and the first marginal Gram entry `J_T[1, 1]`, see §4.
+- This file is the plan for the remaining `J_T` entries and certificates (§6).
 - Statements marked *exploratory* were checked numerically, not in the kernel.
 
 ## 1. What V2e-A provides (kernel-checked)
@@ -109,32 +110,43 @@ Every cell integral is therefore an iterated one-variable polynomial integral wi
 
   It is kernel-checked, and a direct 3-dimensional grid integration of the analogous `N = 3` piece agrees.
 
-## 4. V2f: all branches and `J_T` entries
+## 4. V2f: all branches and `J_T[1, 1]` (done)
 
-1. **The other two branches as signed `boxTri` cells.** Each remaining cell is a difference of cells of the V2e-B shape, so `boxVal` covers them.
+**All four cells as signed `boxTri` cells** (`cells_integral`, kernel-checked). On the piece region `P = boxTri c M M`, with `A₁ = min c c₁` and `M₃ = min M (L' − g)`:
 
-   With `A' = min c (C(r) − r g)`:
-   - **`g` branch** (`U = g`): the cell is `{c₁ ≤ u₁ ≤ A', u₁ + u₂ ≤ min(c₃, M)}`, which equals:
+| cell | set | `U` |
+|---|---|---|
+| `Z₁` | `boxTri A₁ c₂ M` | `C(r+1) − r g − u₁` |
+| `Z₂` | `boxTri A₁ M M \ Z₁` | `L' − u₁ − u₂` |
+| `Z₃` | `boxTri c M M₃ \ boxTri A₁ M M₃` | `g` |
+| `Z₄` | `(P \ boxTri A₁ M M) \ Z₃` | `L' − u₁ − u₂` |
 
-     ```text
-     boxTri A' ∞ (min c₃ M) − boxTri (min c₁ A') ∞ (min c₃ M)
-     ```
+Each set difference is an exact `setIntegral_sdiff`.
+- The clamping of the roadmap's §4.1 is built in, through `min c c₁` and `min M (L' − g)`.
+- `box_twoPow` integrates `u₁^α u₂^β (p − u₁)^{m₁} (L' − u₁ − u₂)^{m₂}` over any cell.
+- So `cellsVal` covers every block `U^m (L − S)^n` that a `J_T` Gram entry needs.
 
-     Here `∞` means any `B ≥ M`. Each lower bound is clamped, as in `min c₁ A'`, so that an empty cell contributes 0, not a negative difference.
-   - **`L − S` branch, cap side:** `{u₁ ≤ min(A', c₁), u₂ ≥ c₂, u₁ + u₂ ≤ M}` is a full-height cell minus the cap cell.
-   - **`L − S` branch, `g` side:** `{c₁ ≤ u₁ ≤ A', c₃ ≤ u₁ + u₂ ≤ M}` is a difference of four cells.
+**The stratum-dependent decomposition.** The integrand of `J_T` depends on the rough set of `x̂`.
+- `indicator_supportT_strat` is V2b's inclusion–exclusion with an integrand `G R` that depends on the stratum.
+- `jT_one_pieces` writes `J_T(1)` as `(N+1) Σ_R Σ_{K ⊆ Rᶜ} (−1)^{|K|} ∫_{piece} U²`, using:
+  - `integral_Qset` (translation);
+  - `stratumEndpoint_shift` (aggregates).
+- `piece_block` and `piece_r0` evaluate each piece (two aggregates, or one aggregate for `R = ∅`).
+- `piece_eq_pieceJ` shows the value depends only on `(|R|, |K|)`.
+- `count_by_card` gives `jT_one_eq`. It holds for any `N ≥ 1` and any data with `0 ≤ g ≤ C(1)` and `C(N) < N g`.
 
-   On both sides of the `L − S` branch, lower bounds are clamped the same way (`min c₁ A'`, `min c₂ M`). This branch is where the τ constraint (`D = M`) is active.
-2. **The `J_T` integrand.** For generators `(L − S − u)^a ∏_q (P̂_q + u^q)`, `inner_integral` turns `∫₀^U F` into a polynomial in:
-   - `U`;
-   - `L − S`;
-   - power sums of `x̂`.
+**Certificate.** At Table 3:
+- 133 pieces are nonempty (`r ≤ 13`, `r + k ≤ 15`); each is one `decide +kernel` lemma.
+- Every other piece vanishes by linear arithmetic (`pieceJ_tail`, `pieceJ_high`).
+- `jT_one_table3`: `J_T[1, 1] = 45 ∫_{T̂} U² ≈ 1.11935 × 10⁻⁵⁵`, an exact rational with a 145-digit numerator and a 200-digit denominator.
+- It also holds in Definition 4.6's marginal form, for the generator `gen 0 ∅` (`jT_gram_gen00_table3`, via V2d's `marginal_agrees`).
 
-   After the translation and V2c's placements, each term is `yᵗ` times a polynomial in `(u₁, u₂)` on each cell. `two_group_fin` and `box_poly` then give exact rationals.
-3. **Counting.** Use V2c's `Sig`, `sig_union` and `sig_card` over the 44 outer coordinates, with the cell data indexed by `(r, k)`.
-   - Only the 59 cap classes above, and the analogous lists for the other branches, contribute.
-   - Symmetry gives the factor 45 (V2d's `marginal_agrees`).
-4. **One `J_T` Gram entry at Table 3,** as an exact rational with a small kernel certificate. Then certify `J_T(P⋆) − 4 I_T(P⋆)` directly; the 846 × 846 matrix stays uncertified.
+**Independent checks (exploratory).**
+- Monte Carlo at `N = 44`: within 0.42 and 0.15 standard errors in two runs.
+- Polygon clipping of piece `(1, 0)`: exact agreement.
+- Synthetic data at `N = 3`: grid integration with the true rough-set endpoint agrees to 0.4%.
+
+**A planning correction.** The V2c placement counting is not needed for symmetric integrands. A piece value depends only on `(|R|, |K|)`, so the count is binomial (`count_by_card`). Placements return only for entries whose generators have distinguished coordinates (§6).
 
 ## 5. Costs observed in V2e-A and V2e-B
 
@@ -145,3 +157,18 @@ Every cell integral is therefore an iterated one-variable polynomial integral wi
   - `Solution/CapCell.lean` elaborates in about 5 s, peaking at 3.19 GB.
   - The Comparator suite takes about 115 s, peaking at 3.16 GB.
   - Kernel arithmetic is only the certificate's `capPowVal` and a few small constants.
+- **V2f:**
+  - `Solution/MarginalEntry.lean` elaborates in seconds.
+  - The certificate `Solution/MarginalEntryCert.lean` (133 piece lemmas) is described in `specs/results/V2f_marginal_entry.yaml`.
+
+## 6. After V2f: the remaining `J_T` entries
+
+1. **Generators with power sums.** For `F = (L − S − u)^a ∏_q (P̂_q + u^q)`:
+   - `inner_integral` gives `∫₀^U F` as a polynomial in `U`, `L − S` and the power sums of `x̂`;
+   - each product of two such terms expands into monomials `yᵗ` times blocks `U^m (L − S)^n`.
+
+   `piece_block` already accepts any `yᵗ` and any block. What is new is the expansion of the power sums after the translation, together with V2c's placement counting over the distinguished coordinates (`Sig`, `sig_union`, `sig_card`).
+2. **Certificate cost.**
+   - One symmetric entry costs about 133 piece evaluations at a few seconds each.
+   - Entries with `d` distinguished coordinates multiply this by about `3^d` placements, the same scaling as V2c's `I_T` certificate.
+   - Certifying `J_T(P⋆) − 4 I_T(P⋆)` directly, with symmetry-collapsed placements, remains the route to Theorem 11.1. The 846 × 846 matrices stay uncertified.
