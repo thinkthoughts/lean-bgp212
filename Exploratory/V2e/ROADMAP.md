@@ -5,7 +5,8 @@ Status:
 - **V2e-B is proved** (seventeenth pair, `Solution/CapCell.lean`): the cap branch, see §3.
 - **V2f is proved** (eighteenth pair, `Solution/MarginalEntry.lean`): all branches and the first marginal Gram entry `J_T[1, 1]`, see §4.
 - **V2g is proved** (nineteenth pair, `Solution/PowerSumEntry.lean`): the bilinear `J_T` form, single-coordinate placement, and the power-sum entry `J_T[P₂, 1]`, see §6.
-- This file is the plan for the remaining `J_T` entries and certificates (§7).
+- **V2h is proved** (twentieth pair, `Solution/PowerSumSquare.lean`): monomial weights as moments, two-coordinate placement, and the entry `J_T[P₂, P₂]`, see §8.
+- This file is the plan for the remaining `J_T` entries and certificates (§7, §9).
 - Statements marked *exploratory* were checked numerically, not in the kernel.
 
 ## 1. What V2e-A provides (kernel-checked)
@@ -200,6 +201,7 @@ The inclusion–exclusion therefore carries cancellation to about twelve digits,
 **Measured.**
 - `J_T[1, 1]` costs one `cellsVal` per piece: about 2.4 s; 324 s in total.
 - `J_T[P₂, 1]` costs six `cellsVal` per piece: about 17 s; 2 286 s in total.
+- `J_T[P₂, P₂]` costs 21 `cellsVal`-sized evaluations per piece (15 moments at `m = 2`, five at `m = 4`, one at `m = 6`): 37–101 s per piece; 10 681 s in total (§8). The cost per moment grows with the power of `U`: about 3 s at `m = 2`, 7.7 s at `m = 4`, 14 s at `m = 6`.
 - A single `boxVal` with exponents up to about 90 costs 0.4–0.9 s of kernel time above the import baseline.
 
 **Why the cost is driven by moments.** Every `J_T` entry, after the power-sum expansion and the placement of coordinates, is a rational combination of per-piece moments `cellsVal(α + A, β + B, m, n)`. Here:
@@ -221,8 +223,68 @@ The pieces are independent lemmas, so the work parallelizes on the VPS.
 1. A general placement theorem for products of power sums. This means V2c's set partitions of the parts, each block placed in `R`, `K` or the rest, with falling-factorial multiplicities.
 2. A kernel-computed reduction from `P⋆`'s 846 coefficients to the per-cell polynomial coefficients.
 
-## 8. After V2g
+## 8. V2h: the entry `J_T[P₂, P₂]` (done)
 
-1. **Products of two power sums**, for example `J_T[P₂, P₂]`. This needs two distinguished coordinates and the diagonal `i = j`. Here V2c's `Sig`, `sig_union` and `sig_card` placements enter, generalizing `sum_place`.
-2. **The general generator `(L − P₁)^a P_λ`.** `inner_integral` handles `(M − u)^a`. The new parts are the subset expansion of `∏ (P̂_q + u^q)` and the set-partition placement.
+`J_T[P₂, P₂] = 45 ∫_{T̂} (U P̂₂ + U³/3)² = 45 ∫ (U² P̂₂² + (2/3) U⁴ P̂₂ + U⁶/9)`. The last two blocks
+are V2g's `p2J … 4` (proved for every power of `U`, `piece_P2m`) and V2f's `pieceJ … 6 0`
+(`piece_pow`). The new block carries `P̂₂(y + s)² = Σᵢ Σⱼ (yᵢ + sᵢ)² (yⱼ + sⱼ)²`.
+
+**Moments instead of exponent bookkeeping.** `piece_mono`: for any exponent vector `t`,
+
+```text
+∫_{piece} yᵗ U^m = (∏ tᵢ!) · pieceM N r k a b … m,   a = Σ_{i ∈ R} tᵢ,  b = Σ_{i ∉ R} tᵢ
+```
+
+so a weight matters only through the degrees `(a, b)` landing in the rough and the smooth group.
+This replaces V2g's case analysis on the position of one coordinate and applies to any number of
+distinguished coordinates.
+
+**Two distinguished coordinates.** Each coordinate has a class `cls R K i ∈ {rough, K, neither}`
+with counts `n = (r, k, N − r − k)` and shift `σ = (g, g, 0)`.
+- `sum_place2`: off the diagonal, the ordered pair of classes `(c, d)` occurs `n_c n_d − [c = d] n_c`
+  times; on the diagonal `i = j`, the class `c` occurs `n_c` times. This is V2c's `Sig` placement
+  (`sig_union` splits off the distinguished set `D`, every `a ∈ D` placed in `R`, in `K` or in
+  neither) after the symmetry within each class collapses the `3^|D|` placements to class counts;
+  for `|D| = 2` the coincidence `i = j` is the only set partition beyond the trivial one.
+- `piece_w2`: for `i ≠ j` the degrees add within a group (`yᵢ^a yⱼ^b` with both rough contributes
+  `a + b` to the rough group, factor `a! b!`).
+- `q2J_expand`: collecting the binomial expansion by `(A, B)` gives 15 moments (`A + B ≤ 4`) with
+  explicit coefficients `q2Coef`, polynomial in `g`, `r`, `k`, `N`.
+
+**Certificate (moment table).**
+- Per nonempty piece: the 15 moments at `m = 2` (about 3 s each), the five `pieceE … 4` (about 7.7 s
+  each), `pieceJ … 6 0` (about 14 s); assembling `q2J` and `p2J … 4` from the moment numerals takes
+  under 0.1 s, since the kernel then evaluates only the coefficients.
+- 3 059 piece lemmas in fourteen files, one per row `r`, so a restarted build resumes
+  at the last finished row, and an assembly file for rows and totals.
+- Splitting `p2J … 4` into its five `pieceE` lemmas lowered the peak from 5.88 GB to 4.71 GB.
+- Build: 10 681 s (2 h 58 min) in the build container, rows from 1 509 s (`r = 1`, 15 pieces) down to
+  121 s (`r = 13`); peak 5.18 GB.
+- `J_T[P₂, P₂] ≈ 2.27107 × 10⁻⁵⁸`.
+
+**Independent checks (exploratory).**
+- Monte Carlo at `N = 44`: 2.27512 ± 0.0034 and 2.27075 ± 0.0034 (× 10⁻⁵⁸; z = 1.18, −0.09) with
+  200 000 samples each; three vectorized runs of 4 000 000 samples pooled to 2.27054 ± 0.00044
+  (z = −1.21). The integrand is heavy-tailed: a 100 000-sample run gave z = 3.17.
+- Synthetic `N = 3`: the closed form 0.00136761 against midpoint grids 0.00137584 (200³),
+  0.00136013 (400³), 0.00136800 (800³), 0.00136658 (1600³): relative errors +0.60%, −0.55%,
+  +0.03%, −0.08%. Counting the diagonal twice gives 0.00092516.
+
+**Finding (exploratory): the `{1, P₂}` block is nearly singular.** With V2f's `J_T[1, 1]` and V2g's
+`J_T[P₂, 1]`, `J[P₂,1]² / (J[1,1] J[P₂,P₂]) = 0.98321`: in the `J_T` inner product `P₂` is
+nearly parallel to `1`. If the same holds across `B₂₁`, the `J_T` Gram matrix is badly conditioned
+and the certificate for `J_T(P⋆) − 4 I_T(P⋆)` must stay exact, as the twelve-digit cancellation in
+V2g already indicated (an expectation, not checked beyond this 2 × 2 block).
+
+## 9. After V2h
+
+1. **The general generator `(L − P₁)^a P_λ`.** `piece_mono` already integrates every monomial; what
+   remains is the expansion of `∏ (P̂_q + u^q)` with `|λ|` distinguished coordinates, their set
+   partitions (`i = j` merges blocks, as the diagonal did here), and placement of each block in a
+   class with falling-factorial multiplicities `n_c (n_c − 1) ⋯`, generalizing `sum_place2`.
+2. **Moment sharing.** All entries with the same powers `(m, n)` of `U` and `L − S` share the
+   moment table `pieceM … A B m`; only the coefficients differ, and they cost the kernel almost
+   nothing. A table-driven certificate for many entries at once costs one moment table per
+   `(m, n)`, not one per entry (calibration in §7: about 3 s per moment at `m = 2`, rising with
+   `m`).
 3. **The collapsed per-cell certificate for `J_T(P⋆) − 4 I_T(P⋆)`**, following §7.

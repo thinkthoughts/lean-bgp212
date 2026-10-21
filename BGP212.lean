@@ -18,3 +18,5 @@ import BGP212.Aggregate
 import BGP212.CapCell
 import BGP212.MarginalEntry
 import BGP212.PowerSumEntry
+import BGP212.PowerSumSquare
+import BGP212.PowerSumPlace

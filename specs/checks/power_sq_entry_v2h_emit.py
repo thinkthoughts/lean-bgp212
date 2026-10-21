@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""Emit the kernel certificate for J_T[P₂, P₂] at Table 3 (V2h).
+
+The closed form `p2p2EntryVal 44 g L τ C = q2Sum … 2 + 2/3 · p2Sum … 4 + jtSum … 6 0 / 9`
+(BGP212/PowerSumSquare.lean) is mirrored in exact rational arithmetic (standard library only; the
+cell formulas are V2f's emitter, `pieceE`/`p2J` are V2g's). Certificate layout (moment table):
+
+* `Solution/PowerSumSquareCert0.lean` … `Solution/PowerSumSquareCert13.lean` (one per row `r`), for
+  each of the 133 nonempty pieces `(r, k)`:
+  the 15 moments `pieceM 44 r k A B … 2` with `A + B ≤ 4` (`mom_r_k_A_B`, `decide +kernel`), the
+  piece value `q2J 44 r k … 2` assembled from them (`q2_r_k`: the moments are rewritten to
+  numerals, then `decide +kernel` evaluates only the coefficients `q2Coef`), the five
+  `pieceE 44 r k eR eS … 4` (`e4_r_k_eR_eS`) and `p2J 44 r k … 4` assembled from them (`p4_r_k`),
+  and `pieceJ 44 r k … 6 0` (`u6_r_k`);
+* `Solution/PowerSumSquareCertSum.lean` — rows and totals by `decide +kernel` on numerals.
+
+Usage: python3 -I specs/checks/power_sq_entry_v2h_emit.py [outdir] [--pieces r:k,...] [--test FILE]
+"""
+import os
+import sys
+from fractions import Fraction as Fr
+from math import comb, factorial as fact
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import marginal_entry_v2f_emit as E  # noqa: E402
+import power_sum_entry_v2g_emit as P  # noqa: E402
+
+PIECES = [(r, k) for r in range(14) for k in range(16 - r)]
+E4 = [(0, 0), (1, 0), (0, 1), (2, 0), (0, 2)]
+MOMS = [(A, B) for A in range(5) for B in range(5 - A)]
+
+
+def pieceM(r, k, a, b, m):
+    N, G, TAU, C = P.N, E.G, E.TAU, E.C
+    if C(r) - r * G < 0 or TAU - (r + k) * G < 0:
+        return Fr(0)
+    if r == 0:
+        return Fr(1, fact(N + b - 1)) * E.seg0(k, TAU - k * G, N - 1 + b, m, 0)
+    return Fr(1, fact(r + a - 1)) * Fr(1, fact(N - r + b - 1)) * E.cells(
+        r, k, C(r) - r * G, TAU - (r + k) * G, r - 1 + a, N - r - 1 + b, m, 0)
+
+
+def cnt(r, k, c):
+    return [r, k, P.N - r - k][c]
+
+
+def sig(c):
+    return Fr(0) if c == 2 else E.G
+
+
+def rp(c, a):
+    return a if c == 0 else 0
+
+
+def sp(c, a):
+    return 0 if c == 0 else a
+
+
+def q2Coef(r, k, A, B):
+    v = Fr(0)
+    for c in range(3):
+        v += cnt(r, k, c) * sum(comb(4, a) * sig(c) ** (4 - a) * fact(a)
+                                for a in range(5) if (rp(c, a), sp(c, a)) == (A, B))
+    for c in range(3):
+        for d in range(3):
+            pc = cnt(r, k, c) * cnt(r, k, d) - (cnt(r, k, c) if c == d else 0)
+            v += pc * sum(comb(2, a) * comb(2, b) * sig(c) ** (2 - a) * sig(d) ** (2 - b) * fact(a) * fact(b)
+                          for a in range(3) for b in range(3)
+                          if (rp(c, a) + rp(d, b), sp(c, a) + sp(d, b)) == (A, B))
+    return v
+
+
+def q2J(r, k, m=2, moms=None):
+    if moms is None:
+        moms = {(A, B): pieceM(r, k, A, B, m) for (A, B) in MOMS}
+    return sum(q2Coef(r, k, A, B) * moms[(A, B)] for (A, B) in MOMS)
+
+
+def lit(x):
+    x = Fr(x)
+    return f"({x.numerator} : ℚ)" if x.denominator == 1 else f"({x.numerator} / {x.denominator} : ℚ)"
+
+
+def piece_block(r, k, vals):
+    moms, q2, p4, u6 = vals
+    out = []
+    for (A, B) in MOMS:
+        out.append(f"theorem mom_{r}_{k}_{A}_{B} : pieceM 44 {r} {k} {A} {B} g L τ C 2 = {lit(moms[(A, B)])} := by\n"
+                   "  decide +kernel\n")
+    names = ", ".join(f"mom_{r}_{k}_{A}_{B}" for (A, B) in MOMS)
+    out.append(f"theorem q2_{r}_{k} : q2J 44 {r} {k} g L τ C 2 = {lit(q2)} := by\n"
+               "  simp only [q2J, Finset.sum_range_succ, Finset.sum_range_zero, Nat.reduceSub, zero_add,\n"
+               f"    {names}]\n"
+               "  decide +kernel\n")
+    for (eR, eS) in E4:
+        out.append(f"theorem e4_{r}_{k}_{eR}_{eS} : pieceE 44 {r} {k} {eR} {eS} g L τ C 4 = "
+                   f"{lit(P.pieceE(r, k, eR, eS, 4))} := by\n  decide +kernel\n")
+    e4names = ", ".join(f"e4_{r}_{k}_{eR}_{eS}" for (eR, eS) in E4)
+    out.append(f"theorem p4_{r}_{k} : p2J 44 {r} {k} g L τ C 4 = {lit(p4)} := by\n"
+               f"  simp only [p2J, {e4names}]\n  decide +kernel\n")
+    out.append(f"theorem u6_{r}_{k} : pieceJ 44 {r} {k} g L τ C 6 0 = {lit(u6)} := by\n  decide +kernel\n")
+    return out
+
+
+def values(r, k):
+    moms = {(A, B): pieceM(r, k, A, B, 2) for (A, B) in MOMS}
+    return moms, q2J(r, k, 2, moms), P.p2J(r, k, 4), E.pieceJ(r, k, 6, 0)
+
+
+HDR = """/-
+Copyright (c) 2026 thinkthoughts. All rights reserved.
+Released under MIT license as described in the file LICENSE.
+Source: Axiom Math, "A New Bound for Small Gaps Between Primes", preliminary draft
+(September 3, 2026): Table 3 (p. 39), §9.4, Lemma 9.2 and the display of `J_T` (p. 41).
+-/
+"""
+
+GROUPS = [(r, r) for r in range(14)]  # one resumable file per row
+
+
+def part_file(i, lo, hi, cache):
+    lines = [HDR, "import BGP212.PowerSumSquare\n",
+             f"/-! # V2h: the kernel certificate for `J_T[P₂, P₂]` at Table 3, row `r = {lo}`\n\n"
+             "COMPUTATIONAL CERTIFICATE (generated by `specs/checks/power_sq_entry_v2h_emit.py`). For each\n"
+             "nonempty piece `(r, k)`: the 15 moments `pieceM 44 r k A B … 2` (`A + B ≤ 4`, `mom_r_k_A_B`),\n"
+             "the piece value `q2J … 2` assembled from them (`q2_r_k`), the five `pieceE … 4` and `p2J … 4`\n"
+             "(`e4_r_k_*`, `p4_r_k`), and `pieceJ … 6 0` (`u6_r_k`); each by `decide +kernel`. -/\n",
+             "namespace BGP212.V2e\n", "open BGP212.Params\n"]
+    for (r, k) in PIECES:
+        if lo <= r <= hi:
+            lines += piece_block(r, k, cache[(r, k)])
+    lines.append("end BGP212.V2e\n")
+    return "\n".join(lines)
+
+
+SUM_HEAD = """import Solution.PowerSumEntryCert
+{imports}
+
+/-! # V2h: the kernel certificate for `J_T[P₂, P₂]` at Table 3 (rows and totals)
+
+COMPUTATIONAL CERTIFICATE (generated by `specs/checks/power_sq_entry_v2h_emit.py`). Pieces with
+`r + k ≥ 16` or `r ≥ 14` are empty at Table 3 (V2g's `cond_tail`, `cond_high`) and vanish by
+linear arithmetic; the 133 nonempty piece values come from `Solution/PowerSumSquareCert0` …
+`Solution/PowerSumSquareCert13` (one file per row);
+rows and totals are assembled by `decide +kernel` on numerals. The integral identity that gives
+this number its meaning, `p2p2Entry_eq`, is proved in `Solution/PowerSumSquare.lean`. -/
+
+namespace BGP212.V2e
+
+open BGP212.Params
+
+theorem pieceM_zero (r k a b m : ℕ) (h : C r - r * g < 0 ∨ τ - (r + k) * g < 0) :
+    pieceM 44 r k a b g L τ C m = 0 := by
+  unfold pieceM; rw [if_pos h]
+
+theorem q2J_zero (r k : ℕ) (h : C r - r * g < 0 ∨ τ - (r + k) * g < 0) :
+    q2J 44 r k g L τ C 2 = 0 := by
+  simp only [q2J, pieceM_zero r k _ _ _ h, mul_zero, Finset.sum_const_zero]
+
+theorem p2J4_zero (r k : ℕ) (h : C r - r * g < 0 ∨ τ - (r + k) * g < 0) :
+    p2J 44 r k g L τ C 4 = 0 := by
+  simp only [p2J, pieceE_zero r k _ _ _ h, mul_zero, add_zero]
+
+theorem pieceJ6_zero (r k : ℕ) (h : C r - r * g < 0 ∨ τ - (r + k) * g < 0) :
+    pieceJ 44 r k g L τ C 6 0 = 0 := by
+  unfold pieceJ; rw [if_pos h]
+
+theorem q2Row_high (r : ℕ) (h : 14 ≤ r) : q2Row 44 r g L τ C 2 = 0 :=
+  Finset.sum_eq_zero fun k _ => by rw [q2J_zero r k (cond_high r k h), mul_zero]
+
+theorem p2Row4_high (r : ℕ) (h : 14 ≤ r) : p2Row 44 r g L τ C 4 = 0 :=
+  Finset.sum_eq_zero fun k _ => by rw [p2J4_zero r k (cond_high r k h), mul_zero]
+
+theorem jtRow6_high (r : ℕ) (h : 14 ≤ r) : jtRow 44 r g L τ C 6 0 = 0 :=
+  Finset.sum_eq_zero fun k _ => by rw [pieceJ6_zero r k (cond_high r k h), mul_zero]
+"""
+
+
+def sum_file(cache):
+    imports = "\n".join(f"import Solution.PowerSumSquareCert{i}" for i in range(len(GROUPS)))
+    lines = [HDR, SUM_HEAD.format(imports=imports)]
+    rows = {"q2": {}, "p4": {}, "u6": {}}
+    vals = {"q2": lambda r, k: cache[(r, k)][1], "p4": lambda r, k: cache[(r, k)][2],
+            "u6": lambda r, k: cache[(r, k)][3]}
+    spec = {
+        "q2": ("q2Row", "q2Row 44 {r} g L τ C 2", "q2J_zero", "q2J 44 {r} ({K} + x) g L τ C 2", "q2Row"),
+        "p4": ("p2Row4", "p2Row 44 {r} g L τ C 4", "p2J4_zero", "p2J 44 {r} ({K} + x) g L τ C 4", "p2Row"),
+        "u6": ("jtRow6", "jtRow 44 {r} g L τ C 6 0", "pieceJ6_zero", "pieceJ 44 {r} ({K} + x) g L τ C 6 0", "jtRow"),
+    }
+    for r in range(14):
+        K = 16 - r
+        tail = (44 - r + 1) - K
+        for key, (nm, fn, zero, args, unf) in spec.items():
+            val = sum(comb(44 - r, k) * (-1) ** k * vals[key](r, k) for k in range(K))
+            rows[key][r] = val
+            names = ", ".join(f"{key}_{r}_{k}" for k in range(K))
+            lines.append(
+                f"theorem {nm}_{r} : {fn.format(r=r)} = {lit(val)} := by\n"
+                f"  have hz : ∑ x ∈ Finset.range {tail}, (((44 - {r}).choose ({K} + x) : ℕ) : ℚ) *\n"
+                f"      (-1) ^ ({K} + x) * {args.format(r=r, K=K)} = 0 :=\n"
+                f"    Finset.sum_eq_zero fun x _ => by rw [{zero} {r} ({K} + x) (cond_tail {r} ({K} + x) (by omega)), mul_zero]\n"
+                f"  rw [{unf}, show 44 - {r} + 1 = {K} + {tail} from rfl, Finset.sum_range_add, hz, add_zero]\n"
+                f"  simp only [Finset.sum_range_succ, Finset.sum_range_zero, {names}]\n"
+                "  decide +kernel\n")
+    tots = {}
+    for key, (thm, lhs, eq, rowfn, high, rown) in {
+            "q2": ("q2Sum_table3", "q2Sum 44 g L τ C 2", "q2Sum", "q2Row 44 (14 + x) g L τ C 2", "q2Row_high", "q2Row"),
+            "p4": ("p2Sum4_table3", "p2Sum 44 g L τ C 4", "p2Sum", "p2Row 44 (14 + x) g L τ C 4", "p2Row4_high", "p2Row4"),
+            "u6": ("jtSum6_table3", "jtSum 44 g L τ C 6 0", "jtSum_eq_rows'", "jtRow 44 (14 + x) g L τ C 6 0", "jtRow6_high", "jtRow6"),
+    }.items():
+        tot = 45 * sum(comb(44, r) * rows[key][r] for r in range(14))
+        tots[key] = tot
+        lines.append(
+            f"theorem {thm} : {lhs} = {lit(tot)} := by\n"
+            f"  have hz : ∑ x ∈ Finset.range 31, ((Nat.choose 44 (14 + x) : ℕ) : ℚ) *\n"
+            f"      {rowfn} = 0 :=\n"
+            f"    Finset.sum_eq_zero fun x _ => by rw [{high} (14 + x) (by omega), mul_zero]\n"
+            f"  rw [{eq}, show 44 + 1 = 14 + 31 from rfl, Finset.sum_range_add, hz, add_zero]\n"
+            "  simp only [Finset.sum_range_succ, Finset.sum_range_zero, "
+            + ", ".join(f"{rown}_{r}" for r in range(14)) + "]\n"
+            "  decide +kernel\n")
+    total = tots["q2"] + Fr(2, 3) * tots["p4"] + tots["u6"] / 9
+    lines.append("/-- **`J_T[P₂, P₂]` at Table 3** as a rational. -/\n"
+                 f"theorem p2p2EntryVal_table3 : p2p2EntryVal 44 g L τ C = {lit(total)} := by\n"
+                 "  rw [p2p2EntryVal, q2Sum_table3, p2Sum4_table3, jtSum6_table3]\n"
+                 "  decide +kernel\n")
+    lines.append("end BGP212.V2e\n")
+    return "\n".join(lines), total, tots
+
+
+TEST_HEADER = """import BGP212.PowerSumSquare
+namespace BGP212.V2e
+open BGP212.Params
+"""
+
+if __name__ == "__main__":
+    if "--test" in sys.argv:
+        out = sys.argv[sys.argv.index("--test") + 1]
+        ps = [tuple(int(v) for v in x.split(":")) for x in sys.argv[sys.argv.index("--pieces") + 1].split(",")]
+        lines = [TEST_HEADER]
+        for (r, k) in ps:
+            lines += piece_block(r, k, values(r, k))
+        lines.append("end BGP212.V2e\n")
+        open(out, "w").write("\n".join(lines))
+        print("wrote", out)
+        sys.exit(0)
+    outdir = sys.argv[1] if len(sys.argv) > 1 else "Solution"
+    cache = {rk: values(*rk) for rk in PIECES}
+    for i, (lo, hi) in enumerate(GROUPS):
+        open(os.path.join(outdir, f"PowerSumSquareCert{i}.lean"), "w").write(part_file(i, lo, hi, cache))
+    text, total, tots = sum_file(cache)
+    open(os.path.join(outdir, "PowerSumSquareCertSum.lean"), "w").write(text)
+    print("J_T[P2,P2] =", float(total), {k: float(v) for k, v in tots.items()})
+    print("value", total.numerator, "/", total.denominator)

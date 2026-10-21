@@ -295,6 +295,27 @@ with a power sum, `J_T[P₂, 1]`**.
 - `jT_P2_one_table3` (computational certificate `p2EntryVal_table3`, 266 kernel-evaluated piece
   lemmas): `J_T[P₂, 1] = 45 ∫_{T̂} (U² P̂₂ + U⁴/3) ≈ 4.99944 × 10⁻⁵⁷` at Table 3, an explicit rational.
 
+The twentieth pair is V2h (`Challenge/PowerSumSquare.lean`, `Solution/PowerSumSquare.lean`, the
+certificate `Solution/PowerSumSquareCert0.lean` … `Cert13.lean` (one per row) and
+`Solution/PowerSumSquareCertSum.lean`,
+objects in `BGP212/PowerSumSquare.lean` and `BGP212/PowerSumPlace.lean`): **the marginal Gram entry
+`J_T[P₂, P₂]`, with two distinguished coordinates**.
+
+- `piece_mono`: every monomial weight `yᵗ` on a piece integrates to `(∏ tᵢ!) · pieceM N r k a b … m`,
+  where `a` and `b` are the degrees landing in the rough and the smooth group; `piece_w1`,
+  `piece_w2` specialize to one coordinate and to two distinct coordinates through their classes
+  `cls R K i` (rough, in `K`, neither).
+- `sum_place2`: V2c's placements of two distinguished coordinates, collapsed by symmetry to
+  classes: an ordered pair of classes `(c, d)` occurs `n_c n_d − [c = d] n_c` times off the
+  diagonal, and the diagonal `i = j` occurs `n_c` times with weight `(yᵢ + sᵢ)⁴`.
+- `q2J_expand`, `piece_P2sq`: `∫_{piece} U^m P̂₂(y + g·1_{R∪K})²` as 15 moments (`A + B ≤ 4`) with
+  explicit coefficients `q2Coef`; `piece_P2m` (`P̂₂` at any power of `U`) and `piece_pow`.
+- `p2p2Entry_eq`: `(N + 1) ∫_{T̂} (U P̂₂ + U³/3)² = p2p2EntryVal N g L τ C` for every `N ≥ 1` and
+  data with `0 ≤ g ≤ C(1)`, `C(N) < N g`.
+- `jT_P2_P2_table3`, `jT_P2_table3` (computational certificate `p2p2EntryVal_table3`: a moment
+  table of 1 995 kernel-evaluated moments plus 1 064 further piece lemmas):
+  `J_T[P₂, P₂] = J_T(P₂) ≈ 2.27107 × 10⁻⁵⁸` at Table 3, an explicit rational.
+
 ## What is proved, imported, and external
 
 - **Proved here, kernel-checked:** Lemma 12.1; the Table 3 parameter layer and every
@@ -309,7 +330,8 @@ with a power sum, `J_T[P₂, 1]`**.
   two-aggregate Dirichlet integration and the aggregate form of Lemma 9.2's endpoint (V2e-A);
   exact polygon-cell integrals of the cap branch and one Table 3 cap-branch certificate (V2e-B);
   all three endpoint branches and the marginal Gram entry `J_T[1, 1]` at Table 3 (V2f); the bilinear
-  `J_T` form, single-coordinate placement, and the power-sum entry `J_T[P₂, 1]` at Table 3 (V2g).
+  `J_T` form, single-coordinate placement, and the power-sum entry `J_T[P₂, 1]` at Table 3 (V2g);
+  two-coordinate placement and the entry `J_T[P₂, P₂]` at Table 3 (V2h).
 - **Imported analytic hypotheses (taken as hypotheses in Axiom's certificate too):** the
   Type I/II/III equidistribution estimates (Lemmas 5.3–5.7), bilinear Bombieri–Vinogradov
   (Lemma 8.1), and the Harman decomposition (Proposition 7.2). In A4 these are the named
@@ -438,6 +460,15 @@ python3 -I specs/checks/power_sum_entry_v2g_emit.py /tmp/PowerSumEntryCert.lean
 cmp /tmp/PowerSumEntryCert.lean Solution/PowerSumEntryCert.lean
 python3 -I specs/checks/power_sum_entry_v2g_controls.py /tmp/v2g_ctl
 for f in /tmp/v2g_ctl/*.lean; do lake env lean "$f" >/dev/null 2>&1 && echo "$f accepted" || echo "$f rejected"; done
+```
+
+For V2h's certificate and controls:
+
+```text
+mkdir -p /tmp/v2h_cert && python3 -I specs/checks/power_sq_entry_v2h_emit.py /tmp/v2h_cert
+for f in /tmp/v2h_cert/*.lean; do cmp "$f" "Solution/$(basename "$f")"; done
+python3 -I specs/checks/power_sq_entry_v2h_controls.py /tmp/v2h_ctl
+for f in /tmp/v2h_ctl/*.lean; do lake env lean "$f" >/dev/null 2>&1 && echo "$f accepted" || echo "$f rejected"; done
 ```
 
 `./verify.sh` builds the project and runs Lean Comparator on each config in `Comparator/`.
