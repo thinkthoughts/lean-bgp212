@@ -90,7 +90,7 @@ result:
     - "Your solution is okay!"
   verify_time: "95 seconds for the 21 general statements in the build container; full suite on the VPS"
   run_date: 2026-10-19
-  commit_hash: PENDING_VPS
+  commit_hash: 6cef1f4
 
 next_development:
   general_generators: "(L − P₁)^a P_λ: piece_mono integrates every monomial; add the set-partition placement of |λ| distinguished coordinates (falling-factorial class multiplicities), generalizing sum_place2"
