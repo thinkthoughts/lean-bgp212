@@ -21,7 +21,7 @@
 \newcommand{\code}[1]{\texttt{#1}}
 \title{Exact Rational Integration over Constrained Simplices\\[4pt]\large Symmetric Polynomial Bases, Marginal Geometry, and Lean 4 Verification}
 \author{Reading Point \texorpdfstring{(\href{https://translatepi.ai/}{translatepi.ai})}{(translatepi.ai)}}
-\date{Draft v0.5 --- 19 October 2026}
+\date{Draft v0.6 --- 20 October 2026}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -30,7 +30,16 @@ simplexes constrained by coordinate thresholds and cardinality-dependent caps.
 The development includes exact simplex moments, a rational polynomial subspace of
  dimension 846, cap-parametric formulas for monomial integrals, rational Gram-entry
  representations, fibre decompositions, and two-aggregate Dirichlet integration.
- Exact polygon-cell formulas cover all marginal endpoint branches. Kernel-checked rational certificates establish both the constant entry $J_T[1,1]$ and the nonconstant power-sum entry $J_T[P_2,1]$ under Table 3 parameters. A bilinear marginal form and coordinate-placement accounting underpin the new entry. The Lean 4 development passed all 19 Comparator suites on the VPS. These are independent integration results motivated by a bounded-prime-gap argument; the next target is $J_T[P_2,P_2]$ and eventually variational positivity.
+  Exact polygon-cell formulas cover all marginal endpoint branches. Kernel-checked
+  rational certificates establish the constant entry $J_T[1,1]$, the cross-entry
+  $J_T[P_2,1]$, and the power-sum-square entry $J_T[P_2,P_2]$ under Table~3
+  parameters. The V2h proof uses two distinguished-coordinate placements and
+  a reusable rational moment table, completing a $2\times2$ marginal Gram block
+  on $\operatorname{span}\{1,P_2\}$. The V2h Comparator's 27 statements were
+  accepted by the Lean kernel on the VPS. The previously recorded V2g regression
+  accepted 19 of 19 suites; no retained aggregate log certifies the full V2h
+  regression count. These independent integration results contribute exact
+  foundations for subsequent variational positivity work.
 \end{abstract}
 
 \section{Introduction and scope}
@@ -280,7 +289,7 @@ fibre endpoint as
 The cap index belongs to the stratum $R$. Substituting the translated point's
 rough set $R\cup K$ instead changes the endpoint; the Table~3 control records
 the distinct values $587/1250$ and $461/1250$.
-The cap-branch polygon-cell integration is established in Section~\ref{sec:capcell}; all endpoint branches and the constant marginal Gram entry are treated in Section~\ref{sec:v2f}; the power-sum entry follows in Section~\ref{sec:v2g}.
+The cap-branch polygon-cell integration is established in Section~\ref{sec:capcell}; all endpoint branches and the constant marginal Gram entry are treated in Section~\ref{sec:v2f}; the power-sum entry follows in Section~\ref{sec:v2g}, and the power-sum-square entry in Section~\ref{sec:v2h}.
 
 
 \section{Polygon-cell integration and the cap branch}\label{sec:capcell}
@@ -503,8 +512,87 @@ Six independent Lean-file controls have their expected outcomes: two
 accepted positive controls and four rejected negative controls.
 Numerical cross-checks include a low-dimensional grid and Monte Carlo;
 these support the arithmetic independently of the exact kernel proof.
-The next polynomial cross-entry is $J_T[P_2,P_2]$, requiring two
-distinguished-coordinate placements and a diagonal case.
+The power-sum-square diagonal entry $J_T[P_2,P_2]$, including two
+distinguished-coordinate placements and their diagonal case, is proved in Section~\ref{sec:v2h}.
+
+\section{A two-coordinate moment table and the power-sum-square entry (V2h)}\label{sec:v2h}
+The marginal square of the nonconstant generator is
+\begin{align}\label{eq:p2square}
+ J_T[P_2,P_2]
+ &=45\int_{\widehat T}\left(U\widehat P_2+\frac{U^3}{3}\right)^2d\widehat x\\
+ &=45\int_{\widehat T}\left(U^2\widehat P_2^2
+   +\frac23 U^4\widehat P_2+\frac19 U^6\right)d\widehat x.
+\end{align}
+The new term contains two distinguished coordinate indices:
+\[
+ \widehat P_2^2=\sum_{i,j}x_i^2x_j^2.
+\]
+For $i=j$ a translated summand becomes $(y_i+s_i)^4$; for $i\ne j$
+we obtain $(y_i+s_i)^2(y_j+s_j)^2$, where $s_i$ is the stratum
+translation ($g$ for coordinates in $R\cup K$, zero otherwise).
+The three placement classes $R$, $K$, and their complement have sizes
+$n_c$; the number of ordered distinct-coordinate pairs in classes
+$c,d$ is $n_cn_d-\mathbf1_{c=d}n_c$. The diagonal contributes $n_c$
+placements per class.
+
+\begin{theorem}[Moment-table reduction for the marginal square]\label{thm:v2hmoment}
+For each translated stratum and each exponent vector $t$, the
+weighted piece integral of $y^t U^m$ reduces to a factorial factor
+$\prod_i t_i!$ multiplied by an exact moment determined by the total
+monomial degrees in the rough and smooth coordinate groups. Together
+with the diagonal and distinct-coordinate placement formulas, this
+gives an exact finite rational representation of~\eqref{eq:p2square}.
+\end{theorem}
+\noindent\textbf{Lean development:}
+\nolinkurl{BGP212/PowerSumPlace.lean},\newline\nolinkurl{BGP212/PowerSumSquare.lean},
+\nolinkurl{Solution/PowerSumSquare.lean};\newline
+\nolinkurl{Challenge/PowerSumSquare.lean}.
+The proof reuses the two-aggregate and polygon-cell machinery, with
+moments shared among coordinate placements rather than recomputed for
+each summand.
+
+\begin{proposition}[Table 3 power-sum-square certificate]\label{prop:p2squarecert}
+At the specified Table~3 parameters, the entry $J_T[P_2,P_2]$ is an
+exact rational number represented by the V2h Lean certificate, with
+\[
+ J_T[P_2,P_2]\approx 2.27107\times10^{-58}.
+\]
+The certificate is organized into 14 resumable row files and a final
+assembly file, each checked as part of the V2h Comparator proof.
+\end{proposition}
+\noindent\textbf{Certificate sources:}
+\nolinkurl{Solution/PowerSumSquareCert0.lean} through\newline
+\nolinkurl{Solution/PowerSumSquareCert13.lean},\newline
+\nolinkurl{Solution/PowerSumSquareCertSum.lean};\newline
+\nolinkurl{specs/checks/power_sq_entry_v2h_emit.py}.
+The 27-statement Comparator configuration is
+\nolinkurl{Comparator/power_sum_square_v2h.json}.
+Its final VPS output states that the Lean default kernel accepts the
+solution and reports ``Your solution is okay!''.
+
+\paragraph{The first $2\times2$ marginal Gram block.}
+Combining V2f, V2g, and V2h yields the exact rational entries of
+\[
+ \mathcal G_{\{1,P_2\}}=
+ \begin{pmatrix}
+  J_T[1,1] & J_T[1,P_2]\\
+  J_T[P_2,1] & J_T[P_2,P_2]
+ \end{pmatrix}
+ \approx
+ \begin{pmatrix}
+  1.11935\times10^{-55} & 4.99944\times10^{-57}\\
+  4.99944\times10^{-57} & 2.27107\times10^{-58}
+ \end{pmatrix}.
+\]
+Using the displayed approximations, the Cauchy--Schwarz ratio
+\[
+ \frac{J_T[P_2,1]^2}{J_T[1,1]\,J_T[P_2,P_2]}\approx0.984
+\]
+is close to one. This numerical observation motivates exact assessment
+of determinants and variational certificates; an independent Lean
+certificate for a strictly positive $2\times2$ determinant is not
+asserted here. Independent Monte Carlo and low-dimensional grid
+comparisons test the computed value but are distinct from the Lean proof.
 
 \section{Verification, limitations, and further mathematics}
 The project uses Lean \code{v4.34.0-rc2} and a pinned Mathlib revision
@@ -533,12 +621,20 @@ VPS. The V2g proof commit is
 \href{https://github.com/thinkthoughts/lean-bgp212/commit/ad70abb}{\code{ad70abb}},
 with verification/provenance commit
 \href{https://github.com/thinkthoughts/lean-bgp212/commit/12f8b16}{\code{12f8b16}}.
+For V2h, the 27-statement Comparator accepted the power-sum-square
+certificate on the VPS. Its proof commit is
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/6cef1f4}{\code{6cef1f4}},
+with VPS provenance commit
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/a9b0e0c}{\code{a9b0e0c}}.
+The recorded V2h proof includes 14 rational moment-certificate rows and
+an assembly theorem. The final Comparator acceptance is confirmed; a
+complete 20/20 regression count has not been established from a saved log.
 The reported kernel axioms for these developments are
 \code{propext}, \code{Quot.sound}, and \code{Classical.choice}.
 Results and verification scripts are available in
 \href{https://github.com/thinkthoughts/lean-bgp212/tree/main/specs/results}{\code{specs/results}}.
 
-Further work begins with $J_T[P_2,P_2]$ and extends to general
+Further work extends the three certified entries to general
 power-sum marginal Gram entries and their exact rational evaluation,
 optimized polynomial coefficients, exact variational positivity certificates, and
 remaining analytic hypotheses. The existing Lean development formalizes the
