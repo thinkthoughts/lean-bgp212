@@ -99,7 +99,7 @@ result:
     - "Your solution is okay!"
   verify_time: "about 13 997 seconds for the V2i comparator suite in the build container"
   run_date: 2026-10-21
-  commit_hash: PENDING_VPS
+  commit_hash: a994d73
 
 next_development:
   moment_tables: "certify the moment table for each (m, n) once; any entry using only those keys then costs coefficient arithmetic (milliseconds to seconds per piece)"
