@@ -1,0 +1,3138 @@
+From 8fa2aa528414991597fafad286cf3ebe862c8196 Mon Sep 17 00:00:00 2001
+From: thinkthoughts <dth26b@gmail.com>
+Date: Wed, 21 Oct 2026 20:15:51 -0600
+Subject: [PATCH] V2j: shared-moment aggregation of marginal Gram entries (22nd
+ pair)
+
+V2i's piece value genPieceWith is linear in the moment oracle and reads it
+only at genKeys (duplicate-free, computed by mirroring stateVal/placeVal).
+genPieceWith_eq_keys collapses it to Sum_s coeff(s) * moment(s); aggEntryVal
+collects coefficients per key across a weighted list of generator pairs and
+evaluates each distinct moment once per piece, with aggEntryVal_eq and
+jT_weighted_eq_agg proving equality with V2i's genEntryVal and J_T.
+Kernel demonstration: V2i's certified gpPP_6_3 recomputed from 19 moments
+(115 oracle queries directly), the four V2i entries from 21 shared keys, and
+J_T[P2,P2] on synthetic data. Specification: Exploratory/V2j/SPEC.md.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01DyEq5SJg3P8RhuwC4Kgon8
+---
+ BGP212.lean                         |    1 +
+ BGP212/MomentAgg.lean               |  107 +++
+ Challenge.lean                      |    1 +
+ Challenge/MomentAgg.lean            |  192 ++++
+ Comparator/moment_agg_v2j.json      |   99 +++
+ Exploratory/V2j/SPEC.md             |  127 +++
+ README.md                           |   16 +-
+ Solution.lean                       |    6 +
+ Solution/MomentAgg.lean             |  371 ++++++++
+ Solution/MomentAggDemo1.lean        |  146 +++
+ Solution/MomentAggDemo2.lean        |  105 +++
+ Solution/MomentAggDemo3.lean        |   32 +
+ Solution/MomentAggDemo4.lean        | 1278 +++++++++++++++++++++++++++
+ Solution/MomentAggSuite.lean        |  152 ++++
+ specs/checks/moment_agg_v2j_demo.py |  214 +++++
+ specs/paper/THEOREMS.md             |   26 +
+ specs/results/V2j_moment_agg.yaml   |   73 ++
+ verify.sh                           |    2 +-
+ 18 files changed, 2946 insertions(+), 2 deletions(-)
+ create mode 100644 BGP212/MomentAgg.lean
+ create mode 100644 Challenge/MomentAgg.lean
+ create mode 100644 Comparator/moment_agg_v2j.json
+ create mode 100644 Exploratory/V2j/SPEC.md
+ create mode 100644 Solution/MomentAgg.lean
+ create mode 100644 Solution/MomentAggDemo1.lean
+ create mode 100644 Solution/MomentAggDemo2.lean
+ create mode 100644 Solution/MomentAggDemo3.lean
+ create mode 100644 Solution/MomentAggDemo4.lean
+ create mode 100644 Solution/MomentAggSuite.lean
+ create mode 100644 specs/checks/moment_agg_v2j_demo.py
+ create mode 100644 specs/results/V2j_moment_agg.yaml
+
+diff --git a/BGP212.lean b/BGP212.lean
+index eaf4752..6e2f879 100644
+--- a/BGP212.lean
++++ b/BGP212.lean
+@@ -22,3 +22,4 @@ import BGP212.PowerSumSquare
+ import BGP212.PowerSumPlace
+ import BGP212.GenEntry
+ import BGP212.GenEntryBlock
++import BGP212.MomentAgg
+diff --git a/BGP212/MomentAgg.lean b/BGP212/MomentAgg.lean
+new file mode 100644
+index 0000000..c8e999d
+--- /dev/null
++++ b/BGP212/MomentAgg.lean
+@@ -0,0 +1,107 @@
++/-
++Copyright (c) 2026 thinkthoughts. All rights reserved.
++Released under MIT license as described in the file LICENSE.
++Source: Axiom Math, "A New Bound for Small Gaps Between Primes", preliminary draft
++(September 3, 2026): §9.4, the display of `J_T` (p. 41), §11 (B₂₁, p. 42).
++-/
++import BGP212.GenEntry
++
++/-! # V2j: shared-moment aggregation of marginal Gram entries (definitions)
++
++Track B. The proofs are in `Solution/MomentAgg.lean`. V2i's specification (`genPieceWith`,
++`genEntryVal`) is unchanged; this module adds an evaluation strategy and its data.
++
++**Moment keys.** A key `(A, B, m, n) : MKey` names the moment `pieceMn … A B … m n` of a piece.
++V2i's piece value `genPieceWith … Mo …` reads the moment oracle `Mo` only at the leaves of
++`stateVal`, multiplied by rational coefficients: it is linear in `Mo` and depends on `Mo` only at
++the keys it queries. `stateKeys`, `placeKeys` and `genKeys` list those keys, mirroring the
++recursion of `stateVal`, `placeVal` and `genPieceWith`; `genKeys` removes duplicates.
++
++**Coefficient collapse.** The coefficient of a key `s` is the value against the unit oracle
++`delta s`. For a weighted list of generator pairs `ws` (the shape of `J_T(P⋆) = Σ cᵢ cⱼ J_T[Gᵢ, Gⱼ]`),
++`aggCoeff` sums the coefficients of each key across all pairs before any moment is evaluated, and
++`aggPiece` evaluates each distinct key once: `Σ_{s ∈ aggKeys} aggCoeff s · Mo s`. `aggEntryVal` is
++the signed sum over pieces, as for `genEntryVal`. -/
++
++namespace BGP212.V2e
++
++/-- A moment key `(A, B, m, n)`: rough degree, smooth degree, power of `U`, power of `L − S`. -/
++abbrev MKey := ℕ × ℕ × ℕ × ℕ
++
++/-- A weighted generator pair `(w, a₁, l₁, a₂, l₂)`. -/
++abbrev WPair (K : Type*) := K × ℕ × List ℕ × ℕ × List ℕ
++
++section Formula
++
++variable {K : Type*} [Field K] [LinearOrder K]
++
++/-- **Definition.** The unit moment oracle at the key `s`. -/
++def delta (s : MKey) : ℕ → ℕ → ℕ → ℕ → K := fun A B m n => if (A, B, m, n) = s then 1 else 0
++
++/-- **Definition.** The pairs `(A, B)` at which `stateVal` reads its oracle. -/
++def stateKeys : (d : ℕ) → (Fin d → Fin 3) → (Fin d → List K) → ℕ → ℕ → List (ℕ × ℕ)
++  | 0, _, _, A, B => [(A, B)]
++  | d + 1, c, fs, A, B => ((List.range (fs 0).length).flatMap fun e =>
++      stateKeys d (fun j => c j.succ) (fun j => fs j.succ) (A + roughPart (c 0) e)
++        (B + smoothPart (c 0) e)).dedup
++
++/-- **Definition.** The pairs `(A, B)` at which `placeVal` reads its oracle (every branch,
++whatever its multiplicity), duplicates removed at every level. -/
++def placeKeys : (d : ℕ) → (Fin d → Fin 3) → (Fin d → List K) → List (Fin 3 → List K) →
++    List (ℕ × ℕ)
++  | d, c, fs, [] => stateKeys d c fs 0 0
++  | d, c, fs, φ :: rest =>
++      (((List.finRange d).flatMap fun j =>
++        placeKeys d c (Function.update fs j (lpMul (fs j) (φ (c j)))) rest) ++
++      ((List.finRange 3).flatMap fun c' =>
++        placeKeys (d + 1) (Fin.cons c' c) (Fin.cons (φ c') fs) rest)).dedup
++
++/-- **Definition.** The distinct moment keys queried by `genPieceWith`. -/
++def genKeys (g : K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) : List MKey :=
++  ((innerTerms (K := K) a₁ l₁).flatMap fun t₁ => (innerTerms (K := K) a₂ l₂).flatMap fun t₂ =>
++    (placeKeys (K := K) 0 Fin.elim0 Fin.elim0
++      ((t₁.1 ++ t₂.1).map fun q c => lpShiftPow (clsShift g c) q)).map fun p =>
++        (p.1, p.2, t₁.2.1 + t₂.2.1, t₁.2.2.1 + t₂.2.2.1)).dedup
++
++/-- **Definition.** The keys and coefficients of one generator pair on a piece. -/
++def genCoeffs (N r k : ℕ) (g : K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) :
++    List (MKey × K) :=
++  (genKeys g a₁ l₁ a₂ l₂).map fun s => (s, genPieceWith N r k g (delta s) a₁ l₁ a₂ l₂)
++
++/-- **Definition.** The distinct keys of a weighted list of generator pairs. -/
++def aggKeys (g : K) (ws : List (WPair K)) : List MKey :=
++  (ws.flatMap fun w => genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).dedup
++
++/-- **Definition.** The coefficient of a key, summed over the weighted pairs. -/
++def aggCoeff (N r k : ℕ) (g : K) (ws : List (WPair K)) (s : MKey) : K :=
++  (ws.map fun w => w.1 * genPieceWith N r k g (delta s) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).sum
++
++/-- **Definition.** The aggregated piece value: each distinct key evaluated once. -/
++def aggPiece (N r k : ℕ) (g : K) (ws : List (WPair K)) (Mo : ℕ → ℕ → ℕ → ℕ → K) : K :=
++  ((aggKeys g ws).map fun s => aggCoeff N r k g ws s * Mo s.1 s.2.1 s.2.2.1 s.2.2.2).sum
++
++/-- **Definition.** The aggregated piece value over a given key list `S` (a certificate supplies
++`S` as a literal; `aggPieceOn_eq` needs only that `S` is duplicate-free and covers the keys). -/
++def aggPieceOn (S : List MKey) (N r k : ℕ) (g : K) (ws : List (WPair K))
++    (Mo : ℕ → ℕ → ℕ → ℕ → K) : K :=
++  (S.map fun s => aggCoeff N r k g ws s * Mo s.1 s.2.1 s.2.2.1 s.2.2.2).sum
++
++/-- **Definition.** The aggregated entry over a given key list `S`. -/
++def aggEntryValOn (S : List MKey) (N : ℕ) (g L τ : K) (C : ℕ → K) (ws : List (WPair K)) : K :=
++  (N + 1) * ∑ r ∈ Finset.range (N + 1), (N.choose r : K) *
++    ∑ k ∈ Finset.range (N - r + 1), ((N - r).choose k : K) * (-1) ^ k *
++      aggPieceOn S N r k g ws (fun A B m n => pieceMn N r k A B g L τ C m n)
++
++/-- **Definition.** The aggregated value of `Σ_{(w, …) ∈ ws} w · J_T[G_{a₁,l₁}, G_{a₂,l₂}]`. -/
++def aggEntryVal (N : ℕ) (g L τ : K) (C : ℕ → K) (ws : List (WPair K)) : K :=
++  (N + 1) * ∑ r ∈ Finset.range (N + 1), (N.choose r : K) *
++    ∑ k ∈ Finset.range (N - r + 1), ((N - r).choose k : K) * (-1) ^ k *
++      aggPiece N r k g ws (fun A B m n => pieceMn N r k A B g L τ C m n)
++
++end Formula
++
++/-- **Definition.** The synthetic cap function of the controls and demonstrations (`N = 3`,
++`g = 3/10`, `L = 1`, `τ = 9/10`): `C = 0, 1/2, 3/5, 7/10, 7/10, …`. -/
++def synthC : ℕ → ℚ := fun m => if m = 0 then 0 else if m = 1 then 1 / 2 else if m = 2 then 3 / 5 else 7 / 10
++
++end BGP212.V2e
+diff --git a/Challenge.lean b/Challenge.lean
+index 1e6deae..a8f18b3 100644
+--- a/Challenge.lean
++++ b/Challenge.lean
+@@ -19,3 +19,4 @@ import Challenge.MarginalEntry
+ import Challenge.PowerSumEntry
+ import Challenge.PowerSumSquare
+ import Challenge.GenEntry
++import Challenge.MomentAgg
+diff --git a/Challenge/MomentAgg.lean b/Challenge/MomentAgg.lean
+new file mode 100644
+index 0000000..fe51b09
+--- /dev/null
++++ b/Challenge/MomentAgg.lean
+@@ -0,0 +1,192 @@
++/-
++Copyright (c) 2026 thinkthoughts. All rights reserved.
++Released under MIT license as described in the file LICENSE.
++Source: Axiom Math, "A New Bound for Small Gaps Between Primes", preliminary draft
++(September 3, 2026): Table 3 (p. 39), §9.4, the display of `J_T` (p. 41), §11 (B₂₁, p. 42).
++-/
++import BGP212.MomentAgg
++import BGP212.GenEntryBlock
++import BGP212.Variational
++import Mathlib.MeasureTheory.Integral.IntervalIntegral.Basic
++
++/-! # V2j: shared-moment aggregation of marginal Gram entries
++
++Statements only; proofs live in `Solution/MomentAgg.lean`, the kernel demonstration in
++`Solution/MomentAggDemo1.lean` … `MomentAggDemo4.lean`. Objects are defined in
++`BGP212/MomentAgg.lean` (`MKey`, `WPair`, `delta`, `stateKeys`, `placeKeys`, `genKeys`, `genCoeffs`,
++`aggKeys`, `aggCoeff`, `aggPieceOn`, `aggPiece`, `aggEntryValOn`, `aggEntryVal`) over V2i's
++`BGP212/GenEntry.lean`. The general statements keep `g`, `L`, `τ`, `C` as parameters; Table 3
++enters only through `BGP212.Params`. -/
++
++namespace BGP212.Challenge
++
++open BGP212.Gram BGP212.V2d BGP212.V2e BGP212.Params MeasureTheory
++
++
++theorem stateVal_add {K : Type*} [Field K] (M M' : ℕ → ℕ → K) :
++    ∀ (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K) (A B : ℕ),
++      stateVal (fun A B => M A B + M' A B) d c fs A B =
++        stateVal M d c fs A B + stateVal M' d c fs A B :=
++  sorry
++
++
++theorem stateVal_smul {K : Type*} [Field K] (a : K) (M : ℕ → ℕ → K) :
++    ∀ (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K) (A B : ℕ),
++      stateVal (fun A B => a * M A B) d c fs A B = a * stateVal M d c fs A B :=
++  sorry
++
++
++theorem placeVal_add {K : Type*} [Field K] (M M' : ℕ → ℕ → K) (n : Fin 3 → ℕ) :
++    ∀ (fac : List (Fin 3 → List K)) (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K),
++      placeVal (fun A B => M A B + M' A B) n d c fs fac =
++        placeVal M n d c fs fac + placeVal M' n d c fs fac :=
++  sorry
++
++
++theorem placeVal_smul {K : Type*} [Field K] (a : K) (M : ℕ → ℕ → K) (n : Fin 3 → ℕ) :
++    ∀ (fac : List (Fin 3 → List K)) (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K),
++      placeVal (fun A B => a * M A B) n d c fs fac = a * placeVal M n d c fs fac :=
++  sorry
++
++
++theorem genPieceWith_add {K : Type*} [Field K] (N r k : ℕ) (g : K) (Mo Mo' : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ) (l₁ : List ℕ)
++    (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g (fun A B m n => Mo A B m n + Mo' A B m n) a₁ l₁ a₂ l₂ =
++      genPieceWith N r k g Mo a₁ l₁ a₂ l₂ + genPieceWith N r k g Mo' a₁ l₁ a₂ l₂ :=
++  sorry
++
++
++theorem genPieceWith_smul {K : Type*} [Field K] (N r k : ℕ) (g : K) (a : K) (Mo : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ)
++    (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g (fun A B m n => a * Mo A B m n) a₁ l₁ a₂ l₂ =
++      a * genPieceWith N r k g Mo a₁ l₁ a₂ l₂ :=
++  sorry
++
++
++theorem genPieceWith_zero {K : Type*} [Field K] (N r k : ℕ) (g : K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g (fun _ _ _ _ => (0 : K)) a₁ l₁ a₂ l₂ = 0 :=
++  sorry
++
++/-- **Linearity in the oracle**: the value of a finite combination of oracles is the combination
++of the values. -/
++theorem genPieceWith_listSum {K : Type*} [Field K] [LinearOrder K] {ι : Type*} (N r k : ℕ) (g : K) (S : List ι) (c : ι → K)
++    (F : ι → ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g (fun A B m n => (S.map fun t => c t * F t A B m n).sum) a₁ l₁ a₂ l₂ =
++      (S.map fun t => c t * genPieceWith N r k g (F t) a₁ l₁ a₂ l₂).sum :=
++  sorry
++
++
++theorem stateVal_congr {K : Type*} [Field K] (M M' : ℕ → ℕ → K) :
++    ∀ (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K) (A B : ℕ),
++      (∀ p ∈ stateKeys d c fs A B, M p.1 p.2 = M' p.1 p.2) →
++        stateVal M d c fs A B = stateVal M' d c fs A B :=
++  sorry
++
++
++theorem placeVal_congr {K : Type*} [Field K] (M M' : ℕ → ℕ → K) (n : Fin 3 → ℕ) :
++    ∀ (fac : List (Fin 3 → List K)) (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K),
++      (∀ p ∈ placeKeys d c fs fac, M p.1 p.2 = M' p.1 p.2) →
++        placeVal M n d c fs fac = placeVal M' n d c fs fac :=
++  sorry
++
++/-- **Locality**: `genPieceWith` reads its oracle only at `genKeys`. -/
++theorem genPieceWith_congr {K : Type*} [Field K] [LinearOrder K] (N r k : ℕ) (g : K) (Mo Mo' : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ)
++    (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ)
++    (h : ∀ s ∈ genKeys g a₁ l₁ a₂ l₂, Mo s.1 s.2.1 s.2.2.1 s.2.2.2 = Mo' s.1 s.2.1 s.2.2.1 s.2.2.2) :
++    genPieceWith N r k g Mo a₁ l₁ a₂ l₂ = genPieceWith N r k g Mo' a₁ l₁ a₂ l₂ :=
++  sorry
++
++/-- **Coefficient collapse**: for any duplicate-free key list `S` containing the queried keys,
++`genPieceWith … Mo … = Σ_{s ∈ S} genPieceWith … (delta s) … · Mo s`. -/
++theorem genPieceWith_eq_keys {K : Type*} [Field K] [LinearOrder K] (N r k : ℕ) (g : K) (Mo : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ)
++    (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) (S : List MKey) (hS : S.Nodup)
++    (hcov : ∀ s ∈ genKeys g a₁ l₁ a₂ l₂, s ∈ S) :
++    genPieceWith N r k g Mo a₁ l₁ a₂ l₂ =
++      (S.map fun s => genPieceWith N r k g (delta s) a₁ l₁ a₂ l₂ *
++        Mo s.1 s.2.1 s.2.2.1 s.2.2.2).sum :=
++  sorry
++
++/-- **Coefficient collapse** with V2i's own keys: `genPieceWith = Σ_{(s, c) ∈ genCoeffs} c · Mo s`. -/
++theorem genPieceWith_eq_coeffs {K : Type*} [Field K] [LinearOrder K] (N r k : ℕ) (g : K) (Mo : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ)
++    (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g Mo a₁ l₁ a₂ l₂ =
++      ((genCoeffs N r k g a₁ l₁ a₂ l₂).map fun p => p.2 * Mo p.1.1 p.1.2.1 p.1.2.2.1 p.1.2.2.2).sum :=
++  sorry
++
++/-- **Shared moments across generator pairs**, over a key list `S`: if `S` is duplicate-free and
++contains the keys of every pair, the aggregated piece value is the weighted sum of V2i's piece
++values. -/
++theorem aggPieceOn_eq {K : Type*} [Field K] [LinearOrder K] (S : List MKey) (hS : S.Nodup) (N r k : ℕ) (g : K) (ws : List (WPair K))
++    (hcov : ∀ w ∈ ws, ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ S)
++    (Mo : ℕ → ℕ → ℕ → ℕ → K) :
++    aggPieceOn S N r k g ws Mo =
++      (ws.map fun w => w.1 * genPieceWith N r k g Mo w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).sum :=
++  sorry
++
++/-- **Shared moments across generator pairs** with the canonical keys `aggKeys`. -/
++theorem aggPiece_eq {K : Type*} [Field K] [LinearOrder K] (N r k : ℕ) (g : K) (ws : List (WPair K)) (Mo : ℕ → ℕ → ℕ → ℕ → K) :
++    aggPiece N r k g ws Mo =
++      (ws.map fun w => w.1 * genPieceWith N r k g Mo w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).sum :=
++  sorry
++
++/-- **The aggregated entry** over a key list `S` (duplicate-free, covering the keys):
++`aggEntryValOn S N g L τ C ws = Σ_{(w, a₁, l₁, a₂, l₂) ∈ ws} w · genEntryVal N g L τ C a₁ l₁ a₂ l₂`. -/
++theorem aggEntryValOn_eq {K : Type*} [Field K] [LinearOrder K] (S : List MKey) (hS : S.Nodup) (N : ℕ) (g L τ : K) (C : ℕ → K)
++    (ws : List (WPair K))
++    (hcov : ∀ w ∈ ws, ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ S) :
++    aggEntryValOn S N g L τ C ws =
++      (ws.map fun w => w.1 * genEntryVal N g L τ C w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).sum :=
++  sorry
++
++/-- **The aggregated entry**: `aggEntryVal N g L τ C ws = Σ_{(w, a₁, l₁, a₂, l₂) ∈ ws} w ·
++genEntryVal N g L τ C a₁ l₁ a₂ l₂`. Each piece evaluates every distinct moment once. -/
++theorem aggEntryVal_eq {K : Type*} [Field K] [LinearOrder K] (N : ℕ) (g L τ : K) (C : ℕ → K) (ws : List (WPair K)) :
++    aggEntryVal N g L τ C ws =
++      (ws.map fun w => w.1 * genEntryVal N g L τ C w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).sum :=
++  sorry
++
++/-- **One pair as an aggregated piece value** (term-mode bridge for certificates). -/
++theorem genPiece_eq_aggPieceOn {K : Type*} [Field K] [LinearOrder K] (S : List MKey) (hS : S.Nodup)
++    (N r k : ℕ) (g L τ : K) (C : ℕ → K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ)
++    (hcov : ∀ w ∈ ([(1, a₁, l₁, a₂, l₂)] : List (WPair K)),
++      ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ S) :
++    genPiece N r k g L τ C a₁ l₁ a₂ l₂ =
++      aggPieceOn S N r k g [(1, a₁, l₁, a₂, l₂)] (fun A B m n => pieceMn N r k A B g L τ C m n) :=
++  sorry
++
++/-- **One pair as an aggregated entry** (term-mode bridge for certificates). -/
++theorem genEntryVal_eq_aggEntryValOn {K : Type*} [Field K] [LinearOrder K] (S : List MKey)
++    (hS : S.Nodup) (N : ℕ) (g L τ : K) (C : ℕ → K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ)
++    (hcov : ∀ w ∈ ([(1, a₁, l₁, a₂, l₂)] : List (WPair K)),
++      ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ S) :
++    genEntryVal N g L τ C a₁ l₁ a₂ l₂ = aggEntryValOn S N g L τ C [(1, a₁, l₁, a₂, l₂)] :=
++  sorry
++
++/-- **A weighted sum of marginal Gram entries is the aggregated value**: for every `N ≥ 1`,
++admissible data and weighted generator pairs `ws`, `Σ w · J_T[G_{a₁,l₁}, G_{a₂,l₂}] =
++aggEntryVal N g L τ C ws` (the shape of `J_T(P⋆) = Σ cᵢ cⱼ J_T[Gᵢ, Gⱼ]`). -/
++theorem jT_weighted_eq_agg {N : ℕ} (hN : 0 < N) (g L τ : ℝ) (C : ℕ → ℝ) (hg : 0 ≤ g)
++    (hC1 : g ≤ C 1) (hCN : C N - N * g < 0) (ws : List (WPair ℝ)) :
++    (ws.map fun w => w.1 * jTbil N g L τ C (genFun L w.2.1 w.2.2.1) (genFun L w.2.2.2.1 w.2.2.2.2)).sum =
++      aggEntryVal N g L τ C ws :=
++  sorry
++
++
++theorem genPiecePP_6_3_viaAgg : genPiece 44 6 3 g L τ C 0 [2] 0 [2] = (131137324816032597206337084670791861367797826223071138605212410307363604674514849122712053237683605204139308010564930821851425446428402597303 / 3329626726358813710105275696049091166319247197034093404631815321345402691587029260565470945021360194004955701529979705810546875000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) :=
++  sorry
++
++/-- The four V2i entries on piece `(6, 3)`: `Σ_{w ∈ ws} w · genPieceWith … = …` from 21 shared keys. -/
++theorem agg4_6_3_eq : (List.map (fun w : WPair ℚ => w.1 * genPieceWith 44 6 3 g
++    (fun A B m n => pieceMn 44 6 3 A B g L τ C m n) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2) [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])]).sum =
++    (72121648658152103771075998445448222548953334339394094445742959230265568635264428681768782928376283012297999592355903824370683099662114760933 / 138734446931617237921053154002045465263301966543087225192992305056058445482792885856894622709223341416873154230415821075439453125000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) :=
++  sorry
++
++
++theorem aggSmall_PP : aggEntryValOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 3 (3 / 10 : ℚ) 1 (9 / 10) synthC [((1 : ℚ), 0, [2], 0, [2])] = (775434251 / 567000000000 : ℚ) :=
++  sorry
++
++
++theorem genEntrySmall_PP : genEntryVal 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 0 [2] 0 [2] = (775434251 / 567000000000 : ℚ) :=
++  sorry
++
++end BGP212.Challenge
+diff --git a/Comparator/moment_agg_v2j.json b/Comparator/moment_agg_v2j.json
+new file mode 100644
+index 0000000..bd9acba
+--- /dev/null
++++ b/Comparator/moment_agg_v2j.json
+@@ -0,0 +1,99 @@
++{
++    "challenge_module": "Challenge.MomentAgg",
++    "solution_module": "Solution.MomentAggSuite",
++    "theorem_names": [
++        "BGP212.Challenge.stateVal_add",
++        "BGP212.Challenge.stateVal_smul",
++        "BGP212.Challenge.placeVal_add",
++        "BGP212.Challenge.placeVal_smul",
++        "BGP212.Challenge.genPieceWith_add",
++        "BGP212.Challenge.genPieceWith_smul",
++        "BGP212.Challenge.genPieceWith_zero",
++        "BGP212.Challenge.genPieceWith_listSum",
++        "BGP212.Challenge.stateVal_congr",
++        "BGP212.Challenge.placeVal_congr",
++        "BGP212.Challenge.genPieceWith_congr",
++        "BGP212.Challenge.genPieceWith_eq_keys",
++        "BGP212.Challenge.genPieceWith_eq_coeffs",
++        "BGP212.Challenge.aggPieceOn_eq",
++        "BGP212.Challenge.aggPiece_eq",
++        "BGP212.Challenge.aggEntryValOn_eq",
++        "BGP212.Challenge.aggEntryVal_eq",
++        "BGP212.Challenge.genPiece_eq_aggPieceOn",
++        "BGP212.Challenge.genEntryVal_eq_aggEntryValOn",
++        "BGP212.Challenge.jT_weighted_eq_agg",
++        "BGP212.Challenge.genPiecePP_6_3_viaAgg",
++        "BGP212.Challenge.agg4_6_3_eq",
++        "BGP212.Challenge.aggSmall_PP",
++        "BGP212.Challenge.genEntrySmall_PP"
++    ],
++    "definition_names": [
++        "BGP212.V2e.delta",
++        "BGP212.V2e.stateKeys",
++        "BGP212.V2e.placeKeys",
++        "BGP212.V2e.genKeys",
++        "BGP212.V2e.genCoeffs",
++        "BGP212.V2e.aggKeys",
++        "BGP212.V2e.aggCoeff",
++        "BGP212.V2e.aggPieceOn",
++        "BGP212.V2e.aggPiece",
++        "BGP212.V2e.aggEntryValOn",
++        "BGP212.V2e.aggEntryVal",
++        "BGP212.V2e.synthC",
++        "BGP212.V2e.genFun",
++        "BGP212.V2e.pieceMn",
++        "BGP212.V2e.lpEval",
++        "BGP212.V2e.lpAdd",
++        "BGP212.V2e.lpMul",
++        "BGP212.V2e.lpShiftPow",
++        "BGP212.V2e.coordSum",
++        "BGP212.V2e.stateVal",
++        "BGP212.V2e.placeVal",
++        "BGP212.V2e.subsetTerms",
++        "BGP212.V2e.innerTerms",
++        "BGP212.V2e.genPieceWith",
++        "BGP212.V2e.genPiece",
++        "BGP212.V2e.genRow",
++        "BGP212.V2e.genEntryVal",
++        "BGP212.V2e.clsCount",
++        "BGP212.V2e.clsShift",
++        "BGP212.V2e.roughPart",
++        "BGP212.V2e.smoothPart",
++        "BGP212.V2e.jTbil",
++        "BGP212.V2e.twoPowVal",
++        "BGP212.V2e.cellsVal",
++        "BGP212.V2e.seg0Val",
++        "BGP212.V2e.boxTri",
++        "BGP212.V2e.boxVal",
++        "BGP212.V2e.innerVal",
++        "BGP212.V2e.endpointAgg",
++        "BGP212.V2e.aggR",
++        "BGP212.V2e.aggS",
++        "BGP212.V2e.aggExp",
++        "BGP212.V2e.aggConst",
++        "BGP212.V2e.stratumEndpoint",
++        "BGP212.Gram.simplexF",
++        "BGP212.Gram.pieceSet",
++        "BGP212.Gram.supportT",
++        "BGP212.Gram.Qset",
++        "BGP212.Gram.roughSet",
++        "BGP212.Gram.shiftV",
++        "BGP212.V2d.roughCount",
++        "BGP212.V2d.roughMass",
++        "BGP212.V2d.hatSupport",
++        "BGP212.V2d.endpoint",
++        "BGP212.V2d.jT",
++        "BGP212.V2d.marginalJ",
++        "BGP212.Params.Bnum",
++        "BGP212.Params.B",
++        "BGP212.Params.C",
++        "BGP212.Params.g",
++        "BGP212.Params.L",
++        "BGP212.Params.τ"
++    ],
++    "permitted_axioms": [
++        "propext",
++        "Quot.sound",
++        "Classical.choice"
++    ]
++}
+diff --git a/Exploratory/V2j/SPEC.md b/Exploratory/V2j/SPEC.md
+new file mode 100644
+index 0000000..c29412d
+--- /dev/null
++++ b/Exploratory/V2j/SPEC.md
+@@ -0,0 +1,127 @@
++# V2j: shared-moment evaluation and exact Gram-entry aggregation (specification)
++
++Status: specification, proofs and a kernel demonstration on branch `v2j` (based on the V2i snapshot
++`841dd05` = V2i patch applied to `c22e4dc`). V2i's VPS verification is reported separately; nothing
++here assumes it.
++
++## 1. What V2i exposes
++
++V2i's piece value (`BGP212/GenEntry.lean`)
++
++```text
++genPieceWith N r k g Mo a₁ l₁ a₂ l₂ = Σ_{t₁ ∈ innerTerms a₁ l₁} Σ_{t₂ ∈ innerTerms a₂ l₂}
++    c(t₁) c(t₂) · placeVal (fun A B => Mo A B (p₁+p₂) (q₁+q₂)) (clsCount N r k) 0 ∅ ∅ (factors t₁ t₂)
++```
++
++reads the moment oracle `Mo` only at the leaves of `stateVal`, each multiplied by a rational
++coefficient. Hence it is **linear** in `Mo` and **local**: it depends on `Mo` only at the keys it
++queries. Measured (exact model, any piece):
++
++| entry | oracle queries per piece | distinct keys |
++|---|---|---|
++| J[P₂,P₂] | 115 | 19 |
++| J[P₄,1] | 16 | 10 |
++| J[P_{(2,2)},1] | 115 | 19 |
++| J[L−P₁,1] | 2 | 2 |
++| J[P_{(2,2)},P₂] | 1 471 | 44 |
++| J[(L−P₁)P₂,(L−P₁)P₂] | 460 | 57 |
++| J[P_{(2,2)},P_{(2,2)}] | 20 542 | 85 |
++| the four V2i entries together | 248 | 21 (instead of 19 + 10 + 19 + 2 = 50) |
++
++## 2. Data representation (`BGP212/MomentAgg.lean`)
++
++- `MKey := ℕ × ℕ × ℕ × ℕ` — `(A, B, m, n)`: rough degree, smooth degree, power of `U`, power of
++  `L − S`; the moment is `pieceMn N r k A B g L τ C m n`.
++- `delta s` — the unit oracle at `s`.
++- `stateKeys`, `placeKeys`, `genKeys g a₁ l₁ a₂ l₂` — the keys queried, mirroring the recursions of
++  `stateVal`, `placeVal`, `genPieceWith`; duplicates removed at every level (so the 20 542 queries
++  of `J[P_{(2,2)},P_{(2,2)}]` reduce to 85 keys inside the kernel in under 0.1 s).
++- `genCoeffs N r k g …` — `(s, genPieceWith … (delta s) …)` for `s ∈ genKeys`.
++- `WPair K := K × ℕ × List ℕ × ℕ × List ℕ` — a weighted generator pair `(w, a₁, l₁, a₂, l₂)`.
++- `aggKeys g ws` — the union of keys; `aggCoeff N r k g ws s := Σ_{w ∈ ws} w · genPieceWith … (delta s) …`
++  (coefficients collected across pairs **before** any moment is evaluated).
++- `aggPieceOn S N r k g ws Mo := Σ_{s ∈ S} aggCoeff … s · Mo s` and `aggPiece := aggPieceOn (aggKeys g ws)`;
++  `aggEntryValOn S N g L τ C ws`, `aggEntryVal` — the signed piece sums, as for `genEntryVal`.
++
++V2i's definitions are unchanged; V2j is an evaluation layer with its own correctness theorems.
++
++## 3. Theorems (`Solution/MomentAgg.lean`, all proved)
++
++| theorem | statement |
++|---|---|
++| `stateVal_add`, `stateVal_smul`, `placeVal_add`, `placeVal_smul` | linearity in the oracle |
++| `genPieceWith_add`, `genPieceWith_smul`, `genPieceWith_zero`, `genPieceWith_listSum` | linearity of the piece value |
++| `stateVal_congr`, `placeVal_congr`, `genPieceWith_congr` | locality: oracles agreeing on the queried keys give equal values |
++| `genPieceWith_eq_keys` | for any duplicate-free `S ⊇ genKeys`: `genPieceWith Mo = Σ_{s∈S} genPieceWith (delta s) · Mo s` |
++| `genPieceWith_eq_coeffs` | the same with `genCoeffs` |
++| `aggPieceOn_eq`, `aggPiece_eq` | aggregated piece value = `Σ_{w∈ws} w · genPieceWith` |
++| `aggEntryValOn_eq`, `aggEntryVal_eq` | aggregated entry = `Σ_{w∈ws} w · genEntryVal` |
++| `genPiece_eq_aggPieceOn`, `genEntryVal_eq_aggEntryValOn` | one pair as an aggregated value (term-mode bridges for certificates) |
++| `jT_weighted_eq_agg` | `Σ_{w∈ws} w · J_T[G_{a₁,l₁}, G_{a₂,l₂}] = aggEntryVal N g L τ C ws` (every `N ≥ 1`, admissible data) |
++
++Acceptance: no `sorry`, axioms `propext`, `Quot.sound`, `Classical.choice`; the demonstration
++below reproduces V2i's and V2h's certified values.
++
++## 4. Certificate pattern (measured)
++
++A single `decide +kernel` over a whole aggregated piece exhausts memory (piece `(6, 3)` at Table 3:
++5.88 GB at 54 s; the synthetic `N = 3` entry: 5.88 GB at 41 s); so does direct evaluation of V2i's
++`genPiece` (piece `(6, 3)`: 5.88 GB at 63 s; V2i's synthetic `genEntryVal`: 5.88 GB at 155 s). The
++kernel keeps its intermediate results within one declaration, so evaluation is **staged**, one
++declaration per evaluation:
++
++1. `nd`, `cov`: `S` duplicate-free and covering `genKeys` (`decide +kernel`, about 0.3 s);
++2. `ck_*`: each collapsed coefficient `aggCoeff … s` (`decide +kernel`, about 0.15 s; no moment);
++3. `mo_*`: each distinct moment once (`decide +kernel`, 2.3–12.4 s at Table 3);
++4. `agg_*`: `aggPieceOn S … = v` by rewriting with 2–3 and `norm_num`;
++5. `aggPieceOn_eq` / `aggEntryValOn_eq` give V2i's `genPiece` / `genEntryVal`, applied in term mode
++   through `genPiece_eq_aggPieceOn` / `genEntryVal_eq_aggEntryValOn`. (Rewriting the certificate's
++   goal with `rw [← h]` made the elaborator unfold `genPieceWith` while matching and exhausted memory,
++   5.87 GB at 65 s; the term-mode bridge needs only syntactic matching.)
++6. Each `lean` process accumulates memory across declarations: evaluations and assemblies are
++   kept in separate files.
++
++Demonstration (`Solution/MomentAggDemo1–4.lean`, generated by `specs/checks/moment_agg_v2j_demo.py`):
++
++- piece `(6, 3)` of `J_T[P₂, P₂]` at Table 3: 19 moments (84 s in total), the statement
++  `genPiece 44 6 3 … 0 [2] 0 [2] = …` proved independently of V2h's moment lemmas and identical to
++  V2i's `gpPP_6_3` (`genPiecePP_6_3_same_as_v2i : … = gpPP_6_3 := rfl`); direct evaluation of the
++  same statement (115 moment evaluations) exhausts memory;
++- the four V2i entries on that piece: 21 keys, 2 new moments;
++- synthetic `N = 3`: every piece of `J_T[P₂, P₂]` and the whole entry, equal to V2h's synthetic value
++  and to V2i's `genEntryVal` (`genEntrySmall_PP`).
++
++Relation to V2i's certificate: V2i already evaluated each moment once per piece (`tableFn_eq`), with
++the key list supplied by the generator and correctness checked only by the kernel's final
++evaluation. V2j proves the key list complete (`genPieceWith_congr`), proves the collapse
++(`genPieceWith_eq_keys`), and collects coefficients across any weighted set of pairs.
++
++## 5. Toward `J_T(P⋆) − 4 I_T(P⋆)` (forward plan; not a result)
++
++`P⋆ = Σᵢ cᵢ Gᵢ` and `J_T(P⋆) = Σ_{i,j} cᵢ cⱼ J_T[Gᵢ, Gⱼ]`, which is `aggEntryVal` with
++`ws = [(cᵢ cⱼ, aᵢ, λᵢ, aⱼ, λⱼ)]` (`jT_weighted_eq_agg`). Applied literally that is 846² pairs.
++Two further collapses, measured over all 846 generators of `B₂₁` (exact model):
++
++1. **Inner-term collapse.** The inner integrals `∫₀^U Gᵢ` have 75 419 terms in total but only
++   4 317 distinct `(parts kept, power of U, power of M)`; collect `Σᵢ cᵢ c(tᵢ)` per distinct term
++   first (one exact rational per term).
++2. **Integrand collapse.** Products of two collected terms give 170 657 distinct integrands
++   `W(μ, m, n) = ∫ P̂_μ U^m (L − S)^n` (2 361 multisets `μ`, up to 20 parts).
++
++Then `J_T(P⋆) = (N+1) Σ_pieces Σ_{(μ,m,n)} c(μ,m,n) · W_piece(μ,m,n)`. Obstacle: V2i's placement
++recursion enumerates set partitions of the factors (Bell numbers; 20 parts is out of reach).
++Planned replacement: a **symmetric-function reduction** — expand `P̂_μ(y + s)` in class power sums
++`p_{c,a}`, convert each class to the monomial symmetric basis (transition by integer partitions of
++the degree, at most `p(42) = 53 174` of them), and integrate `m_ν` over a Dirichlet group in closed
++form (`#monomials · ∏ νᵢ! · moment`). Its correctness theorem would be stated against
++`genPieceWith` exactly as V2j's are. `I_T(P⋆)` is V2c's closed form; its collapse is analogous.
++
++## 6. Next level: shared cell integrals (specification)
++
++Inside a piece, every moment `pieceMn … A B m n` is a `cellsVal` at exponents `(r−1+A, N−r−1+B)`, and
++`cellsVal` is a signed combination of `boxVal` over five cells with exponents shifted by the
++binomial expansions. The 15 moments of V2h's `m = 2` table call `boxVal` about 615 times with
++about 140 distinct (cell, exponent) pairs (estimate from V2h). Plan: a `boxVal` oracle version of
++`cellsVal` (`cellsValWith`, equal to `cellsVal` by unfolding), linearity and locality as in §3, and
++coefficients collected per (cell, α, β) across all moments of a piece; certificates then evaluate
++each `boxVal` once.
+diff --git a/README.md b/README.md
+index ded1ca5..40fce3e 100644
+--- a/README.md
++++ b/README.md
+@@ -334,6 +334,19 @@ The twenty-first pair is V2i (`Challenge/GenEntry.lean`, `Solution/GenEntry.lean
+   `J_T[P_{(2,2)}, 1]`, `J_T[L − P₁, 1]`, and `J_T[P₂, P₂]` recomputed through the general form
+   (`genEntryPP_eq_v2h`).
+ 
++The twenty-second pair is V2j (`Challenge/MomentAgg.lean`, `Solution/MomentAgg.lean`, the demonstration
++`Solution/MomentAggDemo1.lean` … `Demo4.lean`, wrappers in `Solution/MomentAggSuite.lean`, objects in
++`BGP212/MomentAgg.lean`, specification `Exploratory/V2j/SPEC.md`): **shared-moment aggregation**.
++
++- `genPieceWith_listSum`, `genPieceWith_congr`: V2i's piece value is linear in the moment oracle and
++  reads it only at `genKeys` (the queried keys, listed without duplicates).
++- `genPieceWith_eq_keys`: the coefficient collapse `Σ_{s ∈ S} genPieceWith (delta s) · Mo s`.
++- `aggEntryVal_eq`, `jT_weighted_eq_agg`: for a weighted list of generator pairs (the shape of
++  `J_T(P⋆)`), coefficients collected per key across all pairs and each distinct moment evaluated once
++  per piece give `Σ w · J_T[G_{a₁,λ₁}, G_{a₂,λ₂}]`.
++- Demonstration: V2i's certified piece value `gpPP_6_3` recomputed from 19 moments (115 oracle
++  queries), V2i's four entries on that piece from 21 shared keys, and `J_T[P₂, P₂]` on synthetic data.
++
+ ## What is proved, imported, and external
+ 
+ - **Proved here, kernel-checked:** Lemma 12.1; the Table 3 parameter layer and every
+@@ -350,7 +363,8 @@ The twenty-first pair is V2i (`Challenge/GenEntry.lean`, `Solution/GenEntry.lean
+   all three endpoint branches and the marginal Gram entry `J_T[1, 1]` at Table 3 (V2f); the bilinear
+   `J_T` form, single-coordinate placement, and the power-sum entry `J_T[P₂, 1]` at Table 3 (V2g);
+   two-coordinate placement and the entry `J_T[P₂, P₂]` at Table 3 (V2h); every `J_T` entry of
+-  `B₂₁` generators in closed form, with four Table 3 entries evaluated (V2i).
++  `B₂₁` generators in closed form, with four Table 3 entries evaluated (V2i); shared-moment
++  aggregation of weighted sums of entries, proved equal to V2i's closed form (V2j).
+ - **Imported analytic hypotheses (taken as hypotheses in Axiom's certificate too):** the
+   Type I/II/III equidistribution estimates (Lemmas 5.3–5.7), bilinear Bombieri–Vinogradov
+   (Lemma 8.1), and the Harman decomposition (Proposition 7.2). In A4 these are the named
+diff --git a/Solution.lean b/Solution.lean
+index 8873919..bde4616 100644
+--- a/Solution.lean
++++ b/Solution.lean
+@@ -54,3 +54,9 @@ import Solution.GenEntryCert13
+ import Solution.GenEntryTable
+ import Solution.GenEntryCertSum
+ import Solution.GenEntry
++import Solution.MomentAgg
++import Solution.MomentAggDemo1
++import Solution.MomentAggDemo2
++import Solution.MomentAggDemo3
++import Solution.MomentAggDemo4
++import Solution.MomentAggSuite
+diff --git a/Solution/MomentAgg.lean b/Solution/MomentAgg.lean
+new file mode 100644
+index 0000000..393401d
+--- /dev/null
++++ b/Solution/MomentAgg.lean
+@@ -0,0 +1,371 @@
++/-
++Copyright (c) 2026 thinkthoughts. All rights reserved.
++Released under MIT license as described in the file LICENSE.
++Source: Axiom Math, "A New Bound for Small Gaps Between Primes", preliminary draft
++(September 3, 2026): §9.4, the display of `J_T` (p. 41), §11 (B₂₁, p. 42).
++-/
++import BGP212.MomentAgg
++import Solution.GenEntryTable
++import Solution.GenEntry
++
++/-! # V2j: shared-moment aggregation (proofs)
++
++* linearity of `stateVal`, `placeVal`, `genPieceWith` in the moment oracle;
++* locality: they read the oracle only at `stateKeys`, `placeKeys`, `genKeys`;
++* `genPieceWith_eq_keys`: the coefficient collapse over any duplicate-free key list covering the
++  queried keys, and `genPieceWith_eq_coeffs` for `genCoeffs`;
++* `aggPiece_eq`, `aggEntryVal_eq`: the aggregated value of a weighted list of generator pairs is
++  the weighted sum of V2i's `genPieceWith`, `genEntryVal`. All statements are algebraic identities
++  about V2i's definitions, over any field. -/
++
++namespace BGP212.V2e
++
++section Lin
++
++
++/-! ## `coordSum` -/
++
++theorem coordSum_add' {K : Type*} [Field K] (b b' : ℕ → K) (f : List K) (e : ℕ) :
++    coordSum (fun e => b e + b' e) f e = coordSum b f e + coordSum b' f e := by
++  induction f generalizing e with
++  | nil => simp [coordSum]
++  | cons c f ih => simp only [coordSum, ih]; ring
++
++theorem coordSum_mul' {K : Type*} [Field K] (a : K) (b : ℕ → K) (f : List K) (e : ℕ) :
++    coordSum (fun e => a * b e) f e = a * coordSum b f e := by
++  induction f generalizing e with
++  | nil => simp [coordSum]
++  | cons c f ih => simp only [coordSum, ih]; ring
++
++theorem coordSum_congr' {K : Type*} [Field K] (b b' : ℕ → K) (f : List K) (e : ℕ)
++    (h : ∀ i, i < f.length → b (e + i) = b' (e + i)) : coordSum b f e = coordSum b' f e := by
++  induction f generalizing e with
++  | nil => rfl
++  | cons c f ih =>
++    simp only [coordSum]
++    rw [show b e = b' e from by simpa using h 0 (by simp)]
++    congr 1
++    exact ih (e + 1) fun i hi => by
++      have := h (i + 1) (by simp; omega)
++      rwa [show e + (i + 1) = e + 1 + i by omega] at this
++
++/-! ## Linearity in the oracle -/
++
++theorem stateVal_add {K : Type*} [Field K] (M M' : ℕ → ℕ → K) :
++    ∀ (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K) (A B : ℕ),
++      stateVal (fun A B => M A B + M' A B) d c fs A B =
++        stateVal M d c fs A B + stateVal M' d c fs A B := by
++  intro d
++  induction d with
++  | zero => intro c fs A B; rfl
++  | succ d ih =>
++    intro c fs A B
++    simp only [stateVal]
++    rw [← coordSum_add']
++    exact coordSum_congr' _ _ _ _ fun i _ => by rw [ih]; ring
++
++theorem stateVal_smul {K : Type*} [Field K] (a : K) (M : ℕ → ℕ → K) :
++    ∀ (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K) (A B : ℕ),
++      stateVal (fun A B => a * M A B) d c fs A B = a * stateVal M d c fs A B := by
++  intro d
++  induction d with
++  | zero => intro c fs A B; rfl
++  | succ d ih =>
++    intro c fs A B
++    simp only [stateVal]
++    rw [← coordSum_mul']
++    exact coordSum_congr' _ _ _ _ fun i _ => by rw [ih]; ring
++
++theorem placeVal_add {K : Type*} [Field K] (M M' : ℕ → ℕ → K) (n : Fin 3 → ℕ) :
++    ∀ (fac : List (Fin 3 → List K)) (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K),
++      placeVal (fun A B => M A B + M' A B) n d c fs fac =
++        placeVal M n d c fs fac + placeVal M' n d c fs fac := by
++  intro fac
++  induction fac with
++  | nil => intro d c fs; exact stateVal_add M M' d c fs 0 0
++  | cons φ rest ih =>
++    intro d c fs
++    simp only [placeVal, ih, Finset.sum_add_distrib, mul_add]
++    ring
++
++theorem placeVal_smul {K : Type*} [Field K] (a : K) (M : ℕ → ℕ → K) (n : Fin 3 → ℕ) :
++    ∀ (fac : List (Fin 3 → List K)) (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K),
++      placeVal (fun A B => a * M A B) n d c fs fac = a * placeVal M n d c fs fac := by
++  intro fac
++  induction fac with
++  | nil => intro d c fs; exact stateVal_smul a M d c fs 0 0
++  | cons φ rest ih =>
++    intro d c fs
++    simp only [placeVal, ih]
++    rw [mul_add, Finset.mul_sum, Finset.mul_sum]
++    congr 1
++    refine Finset.sum_congr rfl fun c' _ => ?_
++    ring
++
++end Lin
++
++section Ord
++
++
++theorem genPieceWith_add {K : Type*} [Field K] (N r k : ℕ) (g : K) (Mo Mo' : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ) (l₁ : List ℕ)
++    (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g (fun A B m n => Mo A B m n + Mo' A B m n) a₁ l₁ a₂ l₂ =
++      genPieceWith N r k g Mo a₁ l₁ a₂ l₂ + genPieceWith N r k g Mo' a₁ l₁ a₂ l₂ := by
++  unfold genPieceWith
++  rw [← List.sum_map_add]
++  congr 1; apply List.map_congr_left; intro t₁ _
++  rw [← List.sum_map_add]
++  congr 1; apply List.map_congr_left; intro t₂ _
++  rw [placeVal_add]; ring
++
++theorem genPieceWith_smul {K : Type*} [Field K] (N r k : ℕ) (g : K) (a : K) (Mo : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ)
++    (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g (fun A B m n => a * Mo A B m n) a₁ l₁ a₂ l₂ =
++      a * genPieceWith N r k g Mo a₁ l₁ a₂ l₂ := by
++  unfold genPieceWith
++  rw [← List.sum_map_mul_left]
++  congr 1; apply List.map_congr_left; intro t₁ _
++  rw [← List.sum_map_mul_left]
++  congr 1; apply List.map_congr_left; intro t₂ _
++  rw [placeVal_smul]; ring
++
++theorem placeVal_zero' {K : Type*} [Field K] (n : Fin 3 → ℕ) (fac : List (Fin 3 → List K)) (d : ℕ) (c : Fin d → Fin 3)
++    (fs : Fin d → List K) : placeVal (fun _ _ => (0 : K)) n d c fs fac = 0 :=
++  placeVal_zero n fac d c fs
++
++theorem genPieceWith_zero {K : Type*} [Field K] (N r k : ℕ) (g : K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g (fun _ _ _ _ => (0 : K)) a₁ l₁ a₂ l₂ = 0 := by
++  unfold genPieceWith
++  simp [placeVal_zero']
++
++/-- **Linearity in the oracle**: the value of a finite combination of oracles is the combination
++of the values. -/
++theorem genPieceWith_listSum {K : Type*} [Field K] [LinearOrder K] {ι : Type*} (N r k : ℕ) (g : K) (S : List ι) (c : ι → K)
++    (F : ι → ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g (fun A B m n => (S.map fun t => c t * F t A B m n).sum) a₁ l₁ a₂ l₂ =
++      (S.map fun t => c t * genPieceWith N r k g (F t) a₁ l₁ a₂ l₂).sum := by
++  induction S with
++  | nil => simpa using genPieceWith_zero N r k g a₁ l₁ a₂ l₂
++  | cons t S ih =>
++    simp only [List.map_cons, List.sum_cons]
++    rw [genPieceWith_add, genPieceWith_smul, ih]
++
++end Ord
++
++/-! ## Locality: the queried keys -/
++
++section Loc
++
++
++theorem stateVal_congr {K : Type*} [Field K] (M M' : ℕ → ℕ → K) :
++    ∀ (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K) (A B : ℕ),
++      (∀ p ∈ stateKeys d c fs A B, M p.1 p.2 = M' p.1 p.2) →
++        stateVal M d c fs A B = stateVal M' d c fs A B := by
++  intro d
++  induction d with
++  | zero => intro c fs A B h; exact h (A, B) (by simp [stateKeys])
++  | succ d ih =>
++    intro c fs A B h
++    simp only [stateVal]
++    refine coordSum_congr' _ _ _ _ fun i hi => ?_
++    rw [ih]
++    intro p hp
++    refine h p ?_
++    simp only [stateKeys, List.mem_dedup, List.mem_flatMap, List.mem_range]
++    exact ⟨0 + i, by simpa using hi, by simpa using hp⟩
++
++theorem placeVal_congr {K : Type*} [Field K] (M M' : ℕ → ℕ → K) (n : Fin 3 → ℕ) :
++    ∀ (fac : List (Fin 3 → List K)) (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K),
++      (∀ p ∈ placeKeys d c fs fac, M p.1 p.2 = M' p.1 p.2) →
++        placeVal M n d c fs fac = placeVal M' n d c fs fac := by
++  intro fac
++  induction fac with
++  | nil => intro d c fs h; exact stateVal_congr M M' d c fs 0 0 h
++  | cons φ rest ih =>
++    intro d c fs h
++    simp only [placeVal]
++    congr 1
++    · refine Finset.sum_congr rfl fun j _ => ih _ _ _ fun p hp => h p ?_
++      simp only [placeKeys, List.mem_dedup, List.mem_append, List.mem_flatMap]
++      exact Or.inl ⟨j, List.mem_finRange j, hp⟩
++    · refine Finset.sum_congr rfl fun c' _ => ?_
++      rw [ih _ _ _ fun p hp => h p ?_]
++      simp only [placeKeys, List.mem_dedup, List.mem_append, List.mem_flatMap]
++      exact Or.inr ⟨c', List.mem_finRange c', hp⟩
++
++end Loc
++
++section Ord2
++
++
++/-- **Locality**: `genPieceWith` reads its oracle only at `genKeys`. -/
++theorem genPieceWith_congr {K : Type*} [Field K] [LinearOrder K] (N r k : ℕ) (g : K) (Mo Mo' : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ)
++    (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ)
++    (h : ∀ s ∈ genKeys g a₁ l₁ a₂ l₂, Mo s.1 s.2.1 s.2.2.1 s.2.2.2 = Mo' s.1 s.2.1 s.2.2.1 s.2.2.2) :
++    genPieceWith N r k g Mo a₁ l₁ a₂ l₂ = genPieceWith N r k g Mo' a₁ l₁ a₂ l₂ := by
++  unfold genPieceWith
++  congr 1; apply List.map_congr_left; intro t₁ ht₁
++  congr 1; apply List.map_congr_left; intro t₂ ht₂
++  congr 1
++  refine placeVal_congr _ _ _ _ _ _ _ fun p hp =>
++    h (p.1, p.2, t₁.2.1 + t₂.2.1, t₁.2.2.1 + t₂.2.2.1) ?_
++  simp only [genKeys, List.mem_dedup, List.mem_flatMap, List.mem_map]
++  exact ⟨t₁, ht₁, t₂, ht₂, p, hp, rfl⟩
++
++theorem sum_delta {K : Type*} [Field K] [LinearOrder K] (S : List MKey) (hS : S.Nodup) (f : MKey → K) (s : MKey) (hs : s ∈ S) :
++    (S.map fun t => f t * delta t s.1 s.2.1 s.2.2.1 s.2.2.2).sum = f s := by
++  induction S with
++  | nil => simp at hs
++  | cons t S ih =>
++    simp only [List.map_cons, List.sum_cons]
++    rw [List.nodup_cons] at hS
++    by_cases h : s = t
++    · subst h
++      have hz : (S.map fun t => f t * delta t s.1 s.2.1 s.2.2.1 s.2.2.2).sum = 0 := by
++        refine List.sum_eq_zero fun x hx => ?_
++        obtain ⟨u, hu, rfl⟩ := List.mem_map.mp hx
++        have : (s.1, s.2.1, s.2.2.1, s.2.2.2) ≠ u := fun h' => hS.1 (by simpa [← h'] using hu)
++        simp [delta, this]
++      rw [hz, add_zero]
++      simp [delta]
++    · have hs' : s ∈ S := (List.mem_cons.mp hs).resolve_left h
++      have : (s.1, s.2.1, s.2.2.1, s.2.2.2) ≠ t := fun h' => h (by simpa using h')
++      simp only [delta, if_neg this, mul_zero, zero_add]
++      exact ih hS.2 hs'
++
++/-- **Coefficient collapse**: for any duplicate-free key list `S` containing the queried keys,
++`genPieceWith … Mo … = Σ_{s ∈ S} genPieceWith … (delta s) … · Mo s`. -/
++theorem genPieceWith_eq_keys {K : Type*} [Field K] [LinearOrder K] (N r k : ℕ) (g : K) (Mo : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ)
++    (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) (S : List MKey) (hS : S.Nodup)
++    (hcov : ∀ s ∈ genKeys g a₁ l₁ a₂ l₂, s ∈ S) :
++    genPieceWith N r k g Mo a₁ l₁ a₂ l₂ =
++      (S.map fun s => genPieceWith N r k g (delta s) a₁ l₁ a₂ l₂ *
++        Mo s.1 s.2.1 s.2.2.1 s.2.2.2).sum := by
++  rw [genPieceWith_congr N r k g Mo
++    (fun A B m n => (S.map fun t => Mo t.1 t.2.1 t.2.2.1 t.2.2.2 * delta t A B m n).sum)
++    a₁ l₁ a₂ l₂ fun s hs => (sum_delta S hS (fun t => Mo t.1 t.2.1 t.2.2.1 t.2.2.2) s
++      (hcov s hs)).symm,
++    genPieceWith_listSum]
++  congr 1; apply List.map_congr_left; intro t _; ring
++
++/-- **Coefficient collapse** with V2i's own keys: `genPieceWith = Σ_{(s, c) ∈ genCoeffs} c · Mo s`. -/
++theorem genPieceWith_eq_coeffs {K : Type*} [Field K] [LinearOrder K] (N r k : ℕ) (g : K) (Mo : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ)
++    (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g Mo a₁ l₁ a₂ l₂ =
++      ((genCoeffs N r k g a₁ l₁ a₂ l₂).map fun p => p.2 * Mo p.1.1 p.1.2.1 p.1.2.2.1 p.1.2.2.2).sum := by
++  rw [genPieceWith_eq_keys N r k g Mo a₁ l₁ a₂ l₂ _ (List.nodup_dedup _) fun s hs => hs,
++    genCoeffs, List.map_map]
++  rfl
++
++theorem list_sum_comm {K : Type*} [Field K] {α β : Type*} (as : List α) (bs : List β) (F : α → β → K) :
++    (as.map fun a => (bs.map fun b => F a b).sum).sum = (bs.map fun b => (as.map fun a => F a b).sum).sum := by
++  induction as with
++  | nil => simp
++  | cons a as ih => simp only [List.map_cons, List.sum_cons, ih, List.sum_map_add]
++
++/-- **Shared moments across generator pairs**, over a key list `S`: if `S` is duplicate-free and
++contains the keys of every pair, the aggregated piece value is the weighted sum of V2i's piece
++values. -/
++theorem aggPieceOn_eq {K : Type*} [Field K] [LinearOrder K] (S : List MKey) (hS : S.Nodup) (N r k : ℕ) (g : K) (ws : List (WPair K))
++    (hcov : ∀ w ∈ ws, ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ S)
++    (Mo : ℕ → ℕ → ℕ → ℕ → K) :
++    aggPieceOn S N r k g ws Mo =
++      (ws.map fun w => w.1 * genPieceWith N r k g Mo w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).sum := by
++  have hw : ∀ w ∈ ws, w.1 * genPieceWith N r k g Mo w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2 =
++      (S.map fun s => w.1 * genPieceWith N r k g (delta s) w.2.1 w.2.2.1 w.2.2.2.1
++        w.2.2.2.2 * Mo s.1 s.2.1 s.2.2.1 s.2.2.2).sum := fun w hw' => by
++    rw [genPieceWith_eq_keys N r k g Mo _ _ _ _ S hS (hcov w hw'), ← List.sum_map_mul_left]
++    congr 1; apply List.map_congr_left; intro s _; ring
++  rw [List.map_congr_left hw, list_sum_comm]
++  unfold aggPieceOn aggCoeff
++  congr 1; apply List.map_congr_left; intro s _
++  rw [← List.sum_map_mul_right]
++
++/-- **Shared moments across generator pairs** with the canonical keys `aggKeys`. -/
++theorem aggPiece_eq {K : Type*} [Field K] [LinearOrder K] (N r k : ℕ) (g : K) (ws : List (WPair K)) (Mo : ℕ → ℕ → ℕ → ℕ → K) :
++    aggPiece N r k g ws Mo =
++      (ws.map fun w => w.1 * genPieceWith N r k g Mo w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).sum :=
++  aggPieceOn_eq (aggKeys g ws) (List.nodup_dedup _) N r k g ws (fun w hw s hs => by
++    simp only [aggKeys, List.mem_dedup, List.mem_flatMap]; exact ⟨w, hw, hs⟩) Mo
++
++theorem list_sum_finset_comm {K : Type*} [Field K] {α β : Type*} (as : List α) (s : Finset β) (F : α → β → K) :
++    (as.map fun a => ∑ b ∈ s, F a b).sum = ∑ b ∈ s, (as.map fun a => F a b).sum := by
++  induction as with
++  | nil => simp
++  | cons a as ih => simp only [List.map_cons, List.sum_cons, ih, Finset.sum_add_distrib]
++
++/-- **The aggregated entry** over a key list `S` (duplicate-free, covering the keys):
++`aggEntryValOn S N g L τ C ws = Σ_{(w, a₁, l₁, a₂, l₂) ∈ ws} w · genEntryVal N g L τ C a₁ l₁ a₂ l₂`. -/
++theorem aggEntryValOn_eq {K : Type*} [Field K] [LinearOrder K] (S : List MKey) (hS : S.Nodup) (N : ℕ) (g L τ : K) (C : ℕ → K)
++    (ws : List (WPair K))
++    (hcov : ∀ w ∈ ws, ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ S) :
++    aggEntryValOn S N g L τ C ws =
++      (ws.map fun w => w.1 * genEntryVal N g L τ C w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).sum := by
++  unfold aggEntryValOn genEntryVal genRow genPiece
++  simp_rw [aggPieceOn_eq S hS _ _ _ g ws hcov]
++  have hw : ∀ w : WPair K, w.1 * ((N + 1 : K) * ∑ r ∈ Finset.range (N + 1), (N.choose r : K) *
++      ∑ k ∈ Finset.range (N - r + 1), ((N - r).choose k : K) * (-1) ^ k *
++        genPieceWith N r k g (fun A B m n => pieceMn N r k A B g L τ C m n) w.2.1 w.2.2.1 w.2.2.2.1
++          w.2.2.2.2) =
++      (N + 1 : K) * ∑ r ∈ Finset.range (N + 1), (N.choose r : K) *
++        ∑ k ∈ Finset.range (N - r + 1), ((N - r).choose k : K) * (-1) ^ k *
++          (w.1 * genPieceWith N r k g (fun A B m n => pieceMn N r k A B g L τ C m n) w.2.1 w.2.2.1
++            w.2.2.2.1 w.2.2.2.2) := by
++    intro w
++    simp only [Finset.mul_sum]
++    refine Finset.sum_congr rfl fun r _ => Finset.sum_congr rfl fun k _ => ?_
++    ring
++  rw [List.map_congr_left fun w _ => hw w]
++  symm
++  rw [List.sum_map_mul_left, list_sum_finset_comm]
++  congr 1
++  refine Finset.sum_congr rfl fun r _ => ?_
++  rw [List.sum_map_mul_left, list_sum_finset_comm]
++  congr 1
++  refine Finset.sum_congr rfl fun k _ => ?_
++  rw [List.sum_map_mul_left]
++
++/-- **The aggregated entry**: `aggEntryVal N g L τ C ws = Σ_{(w, a₁, l₁, a₂, l₂) ∈ ws} w ·
++genEntryVal N g L τ C a₁ l₁ a₂ l₂`. Each piece evaluates every distinct moment once. -/
++theorem aggEntryVal_eq {K : Type*} [Field K] [LinearOrder K] (N : ℕ) (g L τ : K) (C : ℕ → K) (ws : List (WPair K)) :
++    aggEntryVal N g L τ C ws =
++      (ws.map fun w => w.1 * genEntryVal N g L τ C w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).sum :=
++  aggEntryValOn_eq (aggKeys g ws) (List.nodup_dedup _) N g L τ C ws fun w hw s hs => by
++    simp only [aggKeys, List.mem_dedup, List.mem_flatMap]; exact ⟨w, hw, hs⟩
++
++/-- **One pair as an aggregated piece value** (term-mode bridge for certificates). -/
++theorem genPiece_eq_aggPieceOn {K : Type*} [Field K] [LinearOrder K] (S : List MKey) (hS : S.Nodup)
++    (N r k : ℕ) (g L τ : K) (C : ℕ → K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ)
++    (hcov : ∀ w ∈ ([(1, a₁, l₁, a₂, l₂)] : List (WPair K)),
++      ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ S) :
++    genPiece N r k g L τ C a₁ l₁ a₂ l₂ =
++      aggPieceOn S N r k g [(1, a₁, l₁, a₂, l₂)] (fun A B m n => pieceMn N r k A B g L τ C m n) := by
++  rw [aggPieceOn_eq S hS N r k g _ hcov]
++  simp [genPiece]
++
++/-- **One pair as an aggregated entry** (term-mode bridge for certificates). -/
++theorem genEntryVal_eq_aggEntryValOn {K : Type*} [Field K] [LinearOrder K] (S : List MKey)
++    (hS : S.Nodup) (N : ℕ) (g L τ : K) (C : ℕ → K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ)
++    (hcov : ∀ w ∈ ([(1, a₁, l₁, a₂, l₂)] : List (WPair K)),
++      ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ S) :
++    genEntryVal N g L τ C a₁ l₁ a₂ l₂ = aggEntryValOn S N g L τ C [(1, a₁, l₁, a₂, l₂)] := by
++  rw [aggEntryValOn_eq S hS N g L τ C _ hcov]
++  simp
++
++end Ord2
++
++/-! ## The integral form -/
++
++open BGP212.Gram BGP212.V2d in
++/-- **A weighted sum of marginal Gram entries is the aggregated value**: for every `N ≥ 1`,
++admissible data and weighted generator pairs `ws`, `Σ w · J_T[G_{a₁,l₁}, G_{a₂,l₂}] =
++aggEntryVal N g L τ C ws` (the shape of `J_T(P⋆) = Σ cᵢ cⱼ J_T[Gᵢ, Gⱼ]`). -/
++theorem jT_weighted_eq_agg {N : ℕ} (hN : 0 < N) (g L τ : ℝ) (C : ℕ → ℝ) (hg : 0 ≤ g)
++    (hC1 : g ≤ C 1) (hCN : C N - N * g < 0) (ws : List (WPair ℝ)) :
++    (ws.map fun w => w.1 * jTbil N g L τ C (genFun L w.2.1 w.2.2.1) (genFun L w.2.2.2.1 w.2.2.2.2)).sum =
++      aggEntryVal N g L τ C ws := by
++  rw [aggEntryVal_eq]
++  congr 1; apply List.map_congr_left; intro w _
++  rw [genEntry_eq hN g L τ C hg hC1 hCN]
++
++end BGP212.V2e
+diff --git a/Solution/MomentAggDemo1.lean b/Solution/MomentAggDemo1.lean
+new file mode 100644
+index 0000000..1170b7e
+--- /dev/null
++++ b/Solution/MomentAggDemo1.lean
+@@ -0,0 +1,146 @@
++/-
++Copyright (c) 2026 thinkthoughts. All rights reserved.
++Released under MIT license as described in the file LICENSE.
++Source: Axiom Math, "A New Bound for Small Gaps Between Primes", preliminary draft
++(September 3, 2026): Table 3 (p. 39), §9.4, the display of `J_T` (p. 41).
++-/
++import Solution.MomentAgg
++import Solution.GenEntryCert6
++
++/-! # V2j: kernel demonstration of shared-moment aggregation
++
++COMPUTATIONAL DEMONSTRATION (generated by `specs/checks/moment_agg_v2j_demo.py`). Every kernel
++evaluation is its own declaration: key-list hypotheses (`nd_*`, `cov_*`), collapsed coefficients
++(`ck_*`), each distinct moment once (`mo_*`, directly from `pieceMn`), the aggregated sums
++(`agg_*`), then V2j's `aggPieceOn_eq` / `aggEntryValOn_eq` give V2i's values.
++
++* `genPiecePP_6_3_viaAgg` recomputes V2i's certified piece value `gpPP_6_3` (same statement,
++  `genPiecePP_6_3_same_as_v2i`) from 19 moments, without V2h's moment lemmas;
++* `agg4_6_3_eq` evaluates V2i's four entries on that piece from 21 shared keys;
++* `genEntrySmall_PP` is `J_T[P₂, P₂]` on synthetic data `N = 3` (V2h's synthetic value). -/
++
++namespace BGP212.V2e
++
++open BGP212.Params
++
++
++theorem nd_PP_6_3 : ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey).Nodup := by decide
++
++theorem cov_PP_6_3 : ∀ w ∈ ([((1 : ℚ), 0, [2], 0, [2])] : List (WPair ℚ)), ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey) := by
++  decide +kernel
++
++theorem ck_PP_6_3_0 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 2, 0) = (228886641 / 152587890625 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_0_0_2_0 : pieceMn 44 6 3 0 0 g L τ C 2 0 = (4275463226282855407459627261432845224933510301468492929059419385280526241994580222093893344171250526671882302614814539113 / 368284649241576041888866303219734262136056212648464295148050275764206942796796795391855994239449501037597656250000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_1 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 4, 0) = (10086 / 390625 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_0_0_4_0 : pieceMn 44 6 3 0 0 g L τ C 4 0 = (31281900639646387296684607392347694577803782153999480283595386758436124777731129729178706324072978138490066472294241593178527927 / 465222530382934857716454997570454521854356755587099233048728486211403448214547415306974187387822894379496574401855468750000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_2 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 6, 0) = (1 / 9 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_0_0_6_0 : pieceMn 44 6 3 0 0 g L τ C 6 0 = (989616184133495786755177894450948369122041270188887077493120643822704237143281218364415975363166078523981265419993128308344940893792561 / 2312240782193620632017552566700757754388366109051453753216538417600974091379881430948243711820389023614552570506930351257324218750000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_3 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 2, 0) = (7443468 / 244140625 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_0_1_2_0 : pieceMn 44 6 3 0 1 g L τ C 2 0 = (1325644998225055762680912138358688911295423243654899626548917046552078877985473134200216797029158734614458817450607619063000097 / 12744029931193186959511857340039879473390555168434296353229344729975675996804657108540936860663350671529769897460937500000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_4 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 4, 0) = (164 / 625 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_0_1_4_0 : pieceMn 44 6 3 0 1 g L τ C 4 0 = (1205484144340882014123767189539199298315711106728008097398025211811936784751370973761672545514340454906779549878308605569810142654313 / 2017955591732614369760773149120661312920755876990359639170797164451759207022441976100285421225066784245427697896957397460937500000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_5 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 2, 0) = (2380296 / 390625 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_0_2_2_0 : pieceMn 44 6 3 0 2 g L τ C 2 0 = (1586504408398527246878713118191695610833789333816381125767889938628837280099796562118920960824276400343562098635271244436458429151 / 1739560085607870019973368526915443548117810780491281452215805555641679773563835695315837881480547366663813591003417968750000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_6 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 4, 0) = (152 / 3 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_0_2_4_0 : pieceMn 44 6 3 0 2 g L τ C 4 0 = (1441485960264826560655781687975904028563376738888147530709336410465447738653153736784498587220167165181308115453101190420030958683076531 / 277468893863234475842106308004090930526603933086174450385984610112116890965585771713789245418446682833746308460831642150878906250000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_7 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (0, 3, 2, 0) = (7872 / 125 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_0_3_2_0 : pieceMn 44 6 3 0 3 g L τ C 2 0 = (12910874738774172851094542691423904727582287071307170889809968392508994696011836691244033343265043437152103225917141869754555504981 / 1649350700363499051445337806092429060715416568190262986814521521409487401405339571797137310227299167308956384658813476562500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_8 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (0, 4, 2, 0) = (6536 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_0_4_2_0 : pieceMn 44 6 3 0 4 g L τ C 2 0 = (29961484273541127568775171840150224540225486207051363033267186344873839448477563799530871946431259716381986300544539939806095414267553 / 455333569416589909074225736211841527018016710705517046787256796081422590302499727940577223250784300034865736961364746093750000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_9 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 2, 0) = (14886936 / 244140625 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_1_0_2_0 : pieceMn 44 6 3 1 0 g L τ C 2 0 = (465767161538533105806806967515023760397318216024638212013033953289087170972024049017618559517857648787809416602395577494933033 / 4477632137986795418206868795149146842002086951071509529513013013234696971850284930027896734827663749456405639648437500000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_10 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 4, 0) = (328 / 625 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_1_0_4_0 : pieceMn 44 6 3 1 0 g L τ C 4 0 = (1205484144340882014123767189282633936644297004268206054780927945083010456175240437283900209062320288008244217712505681771235616171881 / 2017955591732614369760773149120661312920755876990359639170797164451759207022441976100285421225066784245427697896957397460937500000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_11 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (1, 1, 2, 0) = (242064 / 390625 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_1_1_2_0 : pieceMn 44 6 3 1 1 g L τ C 2 0 = (1133217434570376604913366512988331418522986235761711154171114369023760113828674222992069197328821716980168889113119082823554369309 / 1242542918291335728552406090653888248655579128922343894439861111172628409688454068082741343914676690474152565002441406250000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_12 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (1, 2, 2, 0) = (74784 / 625 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_1_2_2_0 : pieceMn 44 6 3 1 2 g L τ C 2 0 = (5932023528625971309962357452812087644485858477134227451987939698610035158020421395630779906325632609469323659500744847031910178673 / 757809781248094158772182235231656595463840044844174885833699077404359076321372235690576601996326644439250230789184570312500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_13 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 2, 0) = (645504 / 390625 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_2_0_2_0 : pieceMn 44 6 3 2 0 g L τ C 2 0 = (66659849092375094406668618399769810219070741939143408741288066889878497244024661396783625666147580330141039321605686768806558797 / 73090759899490336973670946509052249920916419348373170261168300657213435864026709887220079053804511204361915588378906250000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_14 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 4, 0) = (8 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_2_0_4_0 : pieceMn 44 6 3 2 0 g L τ C 4 0 = (1441485960264826560655781686618230289215195657904894535719693357854297434249929348638156692446223052944252174478499169203407686887181747 / 277468893863234475842106308004090930526603933086174450385984610112116890965585771713789245418446682833746308460831642150878906250000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_15 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (2, 1, 2, 0) = (5904 / 625 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_2_1_2_0 : pieceMn 44 6 3 2 1 g L τ C 2 0 = (143800432435312338996673699628380767270246056096560194743723240923039168918929150615142178345848659000459063226932988399736392799899 / 18370354352324489435063590047167399538313087983636377404865187979836704505307747644499150041497159691061824560165405273437500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_16 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (2, 2, 2, 0) = (1824 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_2_2_2_0 : pieceMn 44 6 3 2 2 g L τ C 2 0 = (106227080606191270471111972887407479610574520732393998509252536913583191953463626098323819998139195328230275042735116030703464642391157 / 1614364473386091495808618519296529050336604701592287711336637731561407365617953580880228336980053427396342158317565917968750000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_17 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (3, 0, 2, 0) = (15744 / 625 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_3_0_2_0 : pieceMn 44 6 3 3 0 g L τ C 2 0 = (112708447043893454889284791516377350518186762070925950735999678426680439729882087649946626542597392006839492024831695503932329897891 / 14398385843713789016671462469401475313812960852039322830840282470682822450106072478120955437930206244345754384994506835937500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_PP_6_3_18 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])] (4, 0, 2, 0) = (264 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_4_0_2_0 : pieceMn 44 6 3 4 0 g L τ C 2 0 = (3505493660004311925546695094220636897730035900582374795455713053665649538633679490314631233213000437967831430677440440789436899439744277 / 53274027621741019361684411136785458661107955152545494474109045141526443065392468169047535120341763104079291224479675292968750000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++end BGP212.V2e
+diff --git a/Solution/MomentAggDemo2.lean b/Solution/MomentAggDemo2.lean
+new file mode 100644
+index 0000000..9855f0d
+--- /dev/null
++++ b/Solution/MomentAggDemo2.lean
+@@ -0,0 +1,105 @@
++/-
++Copyright (c) 2026 thinkthoughts. All rights reserved.
++Released under MIT license as described in the file LICENSE.
++Source: Axiom Math, "A New Bound for Small Gaps Between Primes", preliminary draft
++(September 3, 2026): Table 3 (p. 39), §9.4, the display of `J_T` (p. 41).
++-/
++import Solution.MomentAggDemo1
++
++/-! # V2j: kernel demonstration of shared-moment aggregation (continued)
++
++COMPUTATIONAL DEMONSTRATION (generated by `specs/checks/moment_agg_v2j_demo.py`); see
++`Solution/MomentAggDemo1.lean`. -/
++
++namespace BGP212.V2e
++
++open BGP212.Params
++
++
++theorem agg_PP_6_3 : aggPieceOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 44 6 3 g [((1 : ℚ), 0, [2], 0, [2])]
++    (fun A B m n => pieceMn 44 6 3 A B g L τ C m n) = (131137324816032597206337084670791861367797826223071138605212410307363604674514849122712053237683605204139308010564930821851425446428402597303 / 3329626726358813710105275696049091166319247197034093404631815321345402691587029260565470945021360194004955701529979705810546875000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  simp only [aggPieceOn, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
++    ck_PP_6_3_0, mo_44_6_3_0_0_2_0, ck_PP_6_3_1, mo_44_6_3_0_0_4_0, ck_PP_6_3_2, mo_44_6_3_0_0_6_0, ck_PP_6_3_3, mo_44_6_3_0_1_2_0, ck_PP_6_3_4, mo_44_6_3_0_1_4_0, ck_PP_6_3_5, mo_44_6_3_0_2_2_0, ck_PP_6_3_6, mo_44_6_3_0_2_4_0, ck_PP_6_3_7, mo_44_6_3_0_3_2_0, ck_PP_6_3_8, mo_44_6_3_0_4_2_0, ck_PP_6_3_9, mo_44_6_3_1_0_2_0, ck_PP_6_3_10, mo_44_6_3_1_0_4_0, ck_PP_6_3_11, mo_44_6_3_1_1_2_0, ck_PP_6_3_12, mo_44_6_3_1_2_2_0, ck_PP_6_3_13, mo_44_6_3_2_0_2_0, ck_PP_6_3_14, mo_44_6_3_2_0_4_0, ck_PP_6_3_15, mo_44_6_3_2_1_2_0, ck_PP_6_3_16, mo_44_6_3_2_2_2_0, ck_PP_6_3_17, mo_44_6_3_3_0_2_0, ck_PP_6_3_18, mo_44_6_3_4_0_2_0]
++  norm_num
++
++theorem genPiecePP_6_3_viaAgg : genPiece 44 6 3 g L τ C 0 [2] 0 [2] = (131137324816032597206337084670791861367797826223071138605212410307363604674514849122712053237683605204139308010564930821851425446428402597303 / 3329626726358813710105275696049091166319247197034093404631815321345402691587029260565470945021360194004955701529979705810546875000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) :=
++  (genPiece_eq_aggPieceOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] nd_PP_6_3 44 6 3 g L τ C 0 [2] 0 [2] cov_PP_6_3).trans agg_PP_6_3
++
++/-- The recomputation proves exactly V2i's certified statement `gpPP_6_3`. -/
++theorem genPiecePP_6_3_same_as_v2i : genPiecePP_6_3_viaAgg = gpPP_6_3 := rfl
++
++theorem nd_ALL_6_3 : ([(0, 0, 2, 0), (0, 0, 2, 1), (0, 0, 3, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey).Nodup := by decide
++
++theorem cov_ALL_6_3 : ∀ w ∈ ([((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] : List (WPair ℚ)), ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ ([(0, 0, 2, 0), (0, 0, 2, 1), (0, 0, 3, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_0 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (0, 0, 2, 0) = (483205131 / 152587890625 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_1 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (0, 0, 2, 1) = (1 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_0_0_2_1 : pieceMn 44 6 3 0 0 g L τ C 2 1 = (3257688584169673284924380236101235590581416615649082264572454591208231265376901794012104317912631155551486975338266920357253 / 3724230394638899190146209855468549694370624192191656796492783668420451567010465154794474074151366949081420898437500000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_2 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (0, 0, 3, 0) = (-1 / 2 : ℚ) := by
++  decide +kernel
++
++theorem mo_44_6_3_0_0_3_0 : pieceMn 44 6 3 0 0 g L τ C 3 0 = (84156955091049893193879822765456304973491928305423372075152220059090376744302542561733313655221717028570523513861893888331253 / 96209285194838229078777087932937533771241124964951133909396911434194998814437016498857246915576979517936706542968750000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_3 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (0, 0, 4, 0) = (20172 / 390625 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_4 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (0, 0, 6, 0) = (23 / 45 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_5 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (0, 1, 2, 0) = (15713988 / 244140625 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_6 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (0, 1, 4, 0) = (328 / 625 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_7 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (0, 2, 2, 0) = (4821108 / 390625 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_8 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (0, 2, 4, 0) = (304 / 3 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_9 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (0, 3, 2, 0) = (81672 / 625 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_10 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (0, 4, 2, 0) = (13984 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_11 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (1, 0, 2, 0) = (31427976 / 244140625 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_12 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (1, 0, 4, 0) = (656 / 625 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_13 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (1, 1, 2, 0) = (484128 / 390625 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_14 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (1, 2, 2, 0) = (149568 / 625 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_15 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (2, 0, 2, 0) = (282408 / 78125 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_16 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (2, 0, 4, 0) = (16 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_17 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (2, 1, 2, 0) = (11808 / 625 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_18 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (2, 2, 2, 0) = (3648 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_19 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (3, 0, 2, 0) = (37392 / 625 : ℚ) := by
++  decide +kernel
++
++theorem ck_ALL_6_3_20 : aggCoeff 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] (4, 0, 2, 0) = (672 : ℚ) := by
++  decide +kernel
++
++end BGP212.V2e
+diff --git a/Solution/MomentAggDemo3.lean b/Solution/MomentAggDemo3.lean
+new file mode 100644
+index 0000000..10d3ae2
+--- /dev/null
++++ b/Solution/MomentAggDemo3.lean
+@@ -0,0 +1,32 @@
++/-
++Copyright (c) 2026 thinkthoughts. All rights reserved.
++Released under MIT license as described in the file LICENSE.
++Source: Axiom Math, "A New Bound for Small Gaps Between Primes", preliminary draft
++(September 3, 2026): Table 3 (p. 39), §9.4, the display of `J_T` (p. 41).
++-/
++import Solution.MomentAggDemo2
++
++/-! # V2j: kernel demonstration of shared-moment aggregation (continued)
++
++COMPUTATIONAL DEMONSTRATION (generated by `specs/checks/moment_agg_v2j_demo.py`); see
++`Solution/MomentAggDemo1.lean`. -/
++
++namespace BGP212.V2e
++
++open BGP212.Params
++
++
++theorem agg_ALL_6_3 : aggPieceOn [(0, 0, 2, 0), (0, 0, 2, 1), (0, 0, 3, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])]
++    (fun A B m n => pieceMn 44 6 3 A B g L τ C m n) = (72121648658152103771075998445448222548953334339394094445742959230265568635264428681768782928376283012297999592355903824370683099662114760933 / 138734446931617237921053154002045465263301966543087225192992305056058445482792885856894622709223341416873154230415821075439453125000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  simp only [aggPieceOn, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
++    ck_ALL_6_3_0, mo_44_6_3_0_0_2_0, ck_ALL_6_3_1, mo_44_6_3_0_0_2_1, ck_ALL_6_3_2, mo_44_6_3_0_0_3_0, ck_ALL_6_3_3, mo_44_6_3_0_0_4_0, ck_ALL_6_3_4, mo_44_6_3_0_0_6_0, ck_ALL_6_3_5, mo_44_6_3_0_1_2_0, ck_ALL_6_3_6, mo_44_6_3_0_1_4_0, ck_ALL_6_3_7, mo_44_6_3_0_2_2_0, ck_ALL_6_3_8, mo_44_6_3_0_2_4_0, ck_ALL_6_3_9, mo_44_6_3_0_3_2_0, ck_ALL_6_3_10, mo_44_6_3_0_4_2_0, ck_ALL_6_3_11, mo_44_6_3_1_0_2_0, ck_ALL_6_3_12, mo_44_6_3_1_0_4_0, ck_ALL_6_3_13, mo_44_6_3_1_1_2_0, ck_ALL_6_3_14, mo_44_6_3_1_2_2_0, ck_ALL_6_3_15, mo_44_6_3_2_0_2_0, ck_ALL_6_3_16, mo_44_6_3_2_0_4_0, ck_ALL_6_3_17, mo_44_6_3_2_1_2_0, ck_ALL_6_3_18, mo_44_6_3_2_2_2_0, ck_ALL_6_3_19, mo_44_6_3_3_0_2_0, ck_ALL_6_3_20, mo_44_6_3_4_0_2_0]
++  norm_num
++
++/-- The four V2i entries on piece `(6, 3)`: `Σ_{w ∈ ws} w · genPieceWith … = …` from 21 shared keys. -/
++theorem agg4_6_3_eq : (List.map (fun w : WPair ℚ => w.1 * genPieceWith 44 6 3 g
++    (fun A B m n => pieceMn 44 6 3 A B g L τ C m n) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2) [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])]).sum =
++    (72121648658152103771075998445448222548953334339394094445742959230265568635264428681768782928376283012297999592355903824370683099662114760933 / 138734446931617237921053154002045465263301966543087225192992305056058445482792885856894622709223341416873154230415821075439453125000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) :=
++  (aggPieceOn_eq [(0, 0, 2, 0), (0, 0, 2, 1), (0, 0, 3, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] nd_ALL_6_3 44 6 3 g [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])] cov_ALL_6_3
++    (fun A B m n => pieceMn 44 6 3 A B g L τ C m n)).symm.trans agg_ALL_6_3
++
++end BGP212.V2e
+diff --git a/Solution/MomentAggDemo4.lean b/Solution/MomentAggDemo4.lean
+new file mode 100644
+index 0000000..ad0758e
+--- /dev/null
++++ b/Solution/MomentAggDemo4.lean
+@@ -0,0 +1,1278 @@
++/-
++Copyright (c) 2026 thinkthoughts. All rights reserved.
++Released under MIT license as described in the file LICENSE.
++Source: Axiom Math, "A New Bound for Small Gaps Between Primes", preliminary draft
++(September 3, 2026): Table 3 (p. 39), §9.4, the display of `J_T` (p. 41).
++-/
++import Solution.MomentAgg
++
++/-! # V2j: kernel demonstration of shared-moment aggregation (continued)
++
++COMPUTATIONAL DEMONSTRATION (generated by `specs/checks/moment_agg_v2j_demo.py`); see
++`Solution/MomentAggDemo1.lean`. -/
++
++namespace BGP212.V2e
++
++open BGP212.Params
++
++
++theorem nd_S_0_0 : ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey).Nodup := by decide
++
++theorem cov_S_0_0 : ∀ w ∈ ([((1 : ℚ), 0, [2], 0, [2])] : List (WPair ℚ)), ∀ s ∈ genKeys (3 / 10 : ℚ) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey) := by
++  decide +kernel
++
++theorem ck_S_0_0_0 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_0_0_2_0 : pieceMn 3 0 0 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (13399 / 1000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_1 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_0_0_4_0 : pieceMn 3 0 0 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (999647 / 420000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_2 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 6, 0) = (1 / 9 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_0_0_6_0 : pieceMn 3 0 0 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 6 0 = (63475813 / 126000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_3 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_0_1_2_0 : pieceMn 3 0 0 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (34991 / 14400000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_4 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_0_1_4_0 : pieceMn 3 0 0 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (2120957 / 5600000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_5 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_0_2_2_0 : pieceMn 3 0 0 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (1823617 / 5040000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_6 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 4, 0) = (4 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_0_2_4_0 : pieceMn 3 0 0 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (74520283 / 1512000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_7 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 3, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_0_3_2_0 : pieceMn 3 0 0 0 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (2574311 / 56000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_8 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 4, 2, 0) = (96 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_0_4_2_0 : pieceMn 3 0 0 0 4 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (33124879 / 6480000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_9 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_1_0_2_0 : pieceMn 3 0 0 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (13399 / 1000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_10 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_1_0_4_0 : pieceMn 3 0 0 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (999647 / 420000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_11 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_1_1_2_0 : pieceMn 3 0 0 1 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (34991 / 14400000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_12 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 2, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_1_2_2_0 : pieceMn 3 0 0 1 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (1823617 / 5040000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_13 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_2_0_2_0 : pieceMn 3 0 0 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (13399 / 1000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_14 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_2_0_4_0 : pieceMn 3 0 0 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (999647 / 420000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_15 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_2_1_2_0 : pieceMn 3 0 0 2 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (34991 / 14400000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_16 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 2, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_2_2_2_0 : pieceMn 3 0 0 2 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (1823617 / 5040000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_17 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (3, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_3_0_2_0 : pieceMn 3 0 0 3 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (13399 / 1000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_0_18 : aggCoeff 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (4, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_0_4_0_2_0 : pieceMn 3 0 0 4 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (13399 / 1000000 : ℚ) := by
++  decide +kernel
++
++theorem agg_S_0_0 : aggPieceOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 3 0 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])]
++    (fun A B m n => pieceMn 3 0 0 A B (3 / 10 : ℚ) 1 (9 / 10) synthC m n) = (2108836573 / 2835000000000 : ℚ) := by
++  simp only [aggPieceOn, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
++    ck_S_0_0_0, mo_3_0_0_0_0_2_0, ck_S_0_0_1, mo_3_0_0_0_0_4_0, ck_S_0_0_2, mo_3_0_0_0_0_6_0, ck_S_0_0_3, mo_3_0_0_0_1_2_0, ck_S_0_0_4, mo_3_0_0_0_1_4_0, ck_S_0_0_5, mo_3_0_0_0_2_2_0, ck_S_0_0_6, mo_3_0_0_0_2_4_0, ck_S_0_0_7, mo_3_0_0_0_3_2_0, ck_S_0_0_8, mo_3_0_0_0_4_2_0, ck_S_0_0_9, mo_3_0_0_1_0_2_0, ck_S_0_0_10, mo_3_0_0_1_0_4_0, ck_S_0_0_11, mo_3_0_0_1_1_2_0, ck_S_0_0_12, mo_3_0_0_1_2_2_0, ck_S_0_0_13, mo_3_0_0_2_0_2_0, ck_S_0_0_14, mo_3_0_0_2_0_4_0, ck_S_0_0_15, mo_3_0_0_2_1_2_0, ck_S_0_0_16, mo_3_0_0_2_2_2_0, ck_S_0_0_17, mo_3_0_0_3_0_2_0, ck_S_0_0_18, mo_3_0_0_4_0_2_0]
++  norm_num
++
++theorem nd_S_0_1 : ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey).Nodup := by decide
++
++theorem cov_S_0_1 : ∀ w ∈ ([((1 : ℚ), 0, [2], 0, [2])] : List (WPair ℚ)), ∀ s ∈ genKeys (3 / 10 : ℚ) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey) := by
++  decide +kernel
++
++theorem ck_S_0_1_0 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 2, 0) = (81 / 10000 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_0_0_2_0 : pieceMn 3 0 1 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (333 / 125000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_1 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 4, 0) = (3 / 50 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_0_0_4_0 : pieceMn 3 0 1 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (91697 / 262500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_2 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 6, 0) = (1 / 9 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_0_0_6_0 : pieceMn 3 0 1 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 6 0 = (137201 / 2250000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_3 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 2, 0) = (27 / 250 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_0_1_2_0 : pieceMn 3 0 1 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (6983 / 22500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_4 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 4, 0) = (2 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_0_1_4_0 : pieceMn 3 0 1 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (8151 / 250000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_5 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 2, 0) = (9 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_0_2_2_0 : pieceMn 3 0 1 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (23983 / 787500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_6 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 4, 0) = (4 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_0_2_4_0 : pieceMn 3 0 1 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (87883 / 33750000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_7 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 3, 2, 0) = (12 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_0_3_2_0 : pieceMn 3 0 1 0 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (971 / 375000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_8 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 4, 2, 0) = (96 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_0_4_2_0 : pieceMn 3 0 1 0 4 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (68867 / 354375000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_9 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_1_0_2_0 : pieceMn 3 0 1 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (333 / 125000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_10 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_1_0_4_0 : pieceMn 3 0 1 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (91697 / 262500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_11 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_1_1_2_0 : pieceMn 3 0 1 1 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (6983 / 22500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_12 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 2, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_1_2_2_0 : pieceMn 3 0 1 1 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (23983 / 787500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_13 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_2_0_2_0 : pieceMn 3 0 1 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (333 / 125000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_14 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_2_0_4_0 : pieceMn 3 0 1 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (91697 / 262500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_15 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_2_1_2_0 : pieceMn 3 0 1 2 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (6983 / 22500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_16 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 2, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_2_2_2_0 : pieceMn 3 0 1 2 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (23983 / 787500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_17 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (3, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_3_0_2_0 : pieceMn 3 0 1 3 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (333 / 125000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_1_18 : aggCoeff 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (4, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_1_4_0_2_0 : pieceMn 3 0 1 4 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (333 / 125000 : ℚ) := by
++  decide +kernel
++
++theorem agg_S_0_1 : aggPieceOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 3 0 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])]
++    (fun A B m n => pieceMn 3 0 1 A B (3 / 10 : ℚ) 1 (9 / 10) synthC m n) = (18678677 / 88593750000 : ℚ) := by
++  simp only [aggPieceOn, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
++    ck_S_0_1_0, mo_3_0_1_0_0_2_0, ck_S_0_1_1, mo_3_0_1_0_0_4_0, ck_S_0_1_2, mo_3_0_1_0_0_6_0, ck_S_0_1_3, mo_3_0_1_0_1_2_0, ck_S_0_1_4, mo_3_0_1_0_1_4_0, ck_S_0_1_5, mo_3_0_1_0_2_2_0, ck_S_0_1_6, mo_3_0_1_0_2_4_0, ck_S_0_1_7, mo_3_0_1_0_3_2_0, ck_S_0_1_8, mo_3_0_1_0_4_2_0, ck_S_0_1_9, mo_3_0_1_1_0_2_0, ck_S_0_1_10, mo_3_0_1_1_0_4_0, ck_S_0_1_11, mo_3_0_1_1_1_2_0, ck_S_0_1_12, mo_3_0_1_1_2_2_0, ck_S_0_1_13, mo_3_0_1_2_0_2_0, ck_S_0_1_14, mo_3_0_1_2_0_4_0, ck_S_0_1_15, mo_3_0_1_2_1_2_0, ck_S_0_1_16, mo_3_0_1_2_2_2_0, ck_S_0_1_17, mo_3_0_1_3_0_2_0, ck_S_0_1_18, mo_3_0_1_4_0_2_0]
++  norm_num
++
++theorem nd_S_0_2 : ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey).Nodup := by decide
++
++theorem cov_S_0_2 : ∀ w ∈ ([((1 : ℚ), 0, [2], 0, [2])] : List (WPair ℚ)), ∀ s ∈ genKeys (3 / 10 : ℚ) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey) := by
++  decide +kernel
++
++theorem ck_S_0_2_0 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 2, 0) = (81 / 2500 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_0_0_2_0 : pieceMn 3 0 2 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (153 / 1000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_1 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 4, 0) = (3 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_0_0_4_0 : pieceMn 3 0 2 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (5391 / 700000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_2 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 6, 0) = (1 / 9 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_0_0_6_0 : pieceMn 3 0 2 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 6 0 = (909 / 1750000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_3 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 2, 0) = (54 / 125 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_0_1_2_0 : pieceMn 3 0 2 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (189 / 20000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_4 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 4, 0) = (4 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_0_1_4_0 : pieceMn 3 0 2 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (21249 / 56000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_5 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 2, 0) = (108 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_0_2_2_0 : pieceMn 3 0 2 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (1377 / 2800000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_6 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 4, 0) = (4 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_0_2_4_0 : pieceMn 3 0 2 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (4617 / 280000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_7 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 3, 2, 0) = (24 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_0_3_2_0 : pieceMn 3 0 2 0 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (4941 / 224000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_8 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 4, 2, 0) = (96 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_0_4_2_0 : pieceMn 3 0 2 0 4 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (243 / 280000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_9 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_1_0_2_0 : pieceMn 3 0 2 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (153 / 1000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_10 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_1_0_4_0 : pieceMn 3 0 2 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (5391 / 700000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_11 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_1_1_2_0 : pieceMn 3 0 2 1 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (189 / 20000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_12 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 2, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_1_2_2_0 : pieceMn 3 0 2 1 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (1377 / 2800000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_13 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_2_0_2_0 : pieceMn 3 0 2 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (153 / 1000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_14 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_2_0_4_0 : pieceMn 3 0 2 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (5391 / 700000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_15 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_2_1_2_0 : pieceMn 3 0 2 2 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (189 / 20000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_16 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 2, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_2_2_2_0 : pieceMn 3 0 2 2 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (1377 / 2800000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_17 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (3, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_3_0_2_0 : pieceMn 3 0 2 3 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (153 / 1000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_2_18 : aggCoeff 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (4, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_2_4_0_2_0 : pieceMn 3 0 2 4 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (153 / 1000000 : ℚ) := by
++  decide +kernel
++
++theorem agg_S_0_2 : aggPieceOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 3 0 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])]
++    (fun A B m n => pieceMn 3 0 2 A B (3 / 10 : ℚ) 1 (9 / 10) synthC m n) = (1837951 / 140000000000 : ℚ) := by
++  simp only [aggPieceOn, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
++    ck_S_0_2_0, mo_3_0_2_0_0_2_0, ck_S_0_2_1, mo_3_0_2_0_0_4_0, ck_S_0_2_2, mo_3_0_2_0_0_6_0, ck_S_0_2_3, mo_3_0_2_0_1_2_0, ck_S_0_2_4, mo_3_0_2_0_1_4_0, ck_S_0_2_5, mo_3_0_2_0_2_2_0, ck_S_0_2_6, mo_3_0_2_0_2_4_0, ck_S_0_2_7, mo_3_0_2_0_3_2_0, ck_S_0_2_8, mo_3_0_2_0_4_2_0, ck_S_0_2_9, mo_3_0_2_1_0_2_0, ck_S_0_2_10, mo_3_0_2_1_0_4_0, ck_S_0_2_11, mo_3_0_2_1_1_2_0, ck_S_0_2_12, mo_3_0_2_1_2_2_0, ck_S_0_2_13, mo_3_0_2_2_0_2_0, ck_S_0_2_14, mo_3_0_2_2_0_4_0, ck_S_0_2_15, mo_3_0_2_2_1_2_0, ck_S_0_2_16, mo_3_0_2_2_2_2_0, ck_S_0_2_17, mo_3_0_2_3_0_2_0, ck_S_0_2_18, mo_3_0_2_4_0_2_0]
++  norm_num
++
++theorem nd_S_0_3 : ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey).Nodup := by decide
++
++theorem cov_S_0_3 : ∀ w ∈ ([((1 : ℚ), 0, [2], 0, [2])] : List (WPair ℚ)), ∀ s ∈ genKeys (3 / 10 : ℚ) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey) := by
++  decide +kernel
++
++theorem ck_S_0_3_0 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 2, 0) = (729 / 10000 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_0_0_2_0 : pieceMn 3 0 3 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_1 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 4, 0) = (9 / 50 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_0_0_4_0 : pieceMn 3 0 3 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_2 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 6, 0) = (1 / 9 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_0_0_6_0 : pieceMn 3 0 3 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 6 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_3 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 2, 0) = (243 / 250 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_0_1_2_0 : pieceMn 3 0 3 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_4 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 4, 0) = (6 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_0_1_4_0 : pieceMn 3 0 3 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_5 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 2, 0) = (189 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_0_2_2_0 : pieceMn 3 0 3 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_6 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 4, 0) = (4 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_0_2_4_0 : pieceMn 3 0 3 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_7 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 3, 2, 0) = (36 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_0_3_2_0 : pieceMn 3 0 3 0 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_8 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 4, 2, 0) = (96 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_0_4_2_0 : pieceMn 3 0 3 0 4 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_9 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_1_0_2_0 : pieceMn 3 0 3 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_10 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_1_0_4_0 : pieceMn 3 0 3 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_11 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_1_1_2_0 : pieceMn 3 0 3 1 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_12 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 2, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_1_2_2_0 : pieceMn 3 0 3 1 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_13 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_2_0_2_0 : pieceMn 3 0 3 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_14 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_2_0_4_0 : pieceMn 3 0 3 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_15 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_2_1_2_0 : pieceMn 3 0 3 2 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_16 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 2, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_2_2_2_0 : pieceMn 3 0 3 2 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_17 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (3, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_3_0_2_0 : pieceMn 3 0 3 3 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_0_3_18 : aggCoeff 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (4, 0, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_0_3_4_0_2_0 : pieceMn 3 0 3 4 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem agg_S_0_3 : aggPieceOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 3 0 3 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])]
++    (fun A B m n => pieceMn 3 0 3 A B (3 / 10 : ℚ) 1 (9 / 10) synthC m n) = (0 : ℚ) := by
++  simp only [aggPieceOn, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
++    ck_S_0_3_0, mo_3_0_3_0_0_2_0, ck_S_0_3_1, mo_3_0_3_0_0_4_0, ck_S_0_3_2, mo_3_0_3_0_0_6_0, ck_S_0_3_3, mo_3_0_3_0_1_2_0, ck_S_0_3_4, mo_3_0_3_0_1_4_0, ck_S_0_3_5, mo_3_0_3_0_2_2_0, ck_S_0_3_6, mo_3_0_3_0_2_4_0, ck_S_0_3_7, mo_3_0_3_0_3_2_0, ck_S_0_3_8, mo_3_0_3_0_4_2_0, ck_S_0_3_9, mo_3_0_3_1_0_2_0, ck_S_0_3_10, mo_3_0_3_1_0_4_0, ck_S_0_3_11, mo_3_0_3_1_1_2_0, ck_S_0_3_12, mo_3_0_3_1_2_2_0, ck_S_0_3_13, mo_3_0_3_2_0_2_0, ck_S_0_3_14, mo_3_0_3_2_0_4_0, ck_S_0_3_15, mo_3_0_3_2_1_2_0, ck_S_0_3_16, mo_3_0_3_2_2_2_0, ck_S_0_3_17, mo_3_0_3_3_0_2_0, ck_S_0_3_18, mo_3_0_3_4_0_2_0]
++  norm_num
++
++theorem nd_S_1_0 : ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey).Nodup := by decide
++
++theorem cov_S_1_0 : ∀ w ∈ ([((1 : ℚ), 0, [2], 0, [2])] : List (WPair ℚ)), ∀ s ∈ genKeys (3 / 10 : ℚ) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey) := by
++  decide +kernel
++
++theorem ck_S_1_0_0 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 2, 0) = (81 / 10000 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_0_0_2_0 : pieceMn 3 1 0 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (37 / 25000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_1 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 4, 0) = (3 / 50 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_0_0_4_0 : pieceMn 3 1 0 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (4103 / 37500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_2 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 6, 0) = (1 / 9 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_0_0_6_0 : pieceMn 3 1 0 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 6 0 = (3119 / 350000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_3 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_0_1_2_0 : pieceMn 3 1 0 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (4799 / 22500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_4 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_0_1_4_0 : pieceMn 3 1 0 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (74803 / 5250000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_5 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 2, 0) = (18 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_0_2_2_0 : pieceMn 3 1 0 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (2689 / 112500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_6 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 4, 0) = (8 / 3 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_0_2_4_0 : pieceMn 3 1 0 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (113647 / 78750000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_7 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 3, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_0_3_2_0 : pieceMn 3 1 0 0 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (17417 / 7875000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_8 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 4, 2, 0) = (56 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_0_4_2_0 : pieceMn 3 1 0 0 4 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (20707 / 118125000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_9 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 2, 0) = (27 / 250 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_1_0_2_0 : pieceMn 3 1 0 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (559 / 4500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_10 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 4, 0) = (2 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_1_0_4_0 : pieceMn 3 1 0 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (6749 / 750000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_11 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_1_1_2_0 : pieceMn 3 1 0 1 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (1849 / 112500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_12 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 2, 2, 0) = (24 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_1_2_2_0 : pieceMn 3 1 0 1 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (1907 / 1125000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_13 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 2, 0) = (27 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_2_0_2_0 : pieceMn 3 1 0 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (847 / 112500000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_14 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 4, 0) = (4 / 3 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_2_0_4_0 : pieceMn 3 1 0 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (6061 / 11250000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_15 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_2_1_2_0 : pieceMn 3 1 0 2 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (1067 / 1125000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_16 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 2, 2, 0) = (16 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_2_2_2_0 : pieceMn 3 1 0 2 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (2749 / 29531250000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_17 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (3, 0, 2, 0) = (36 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_3_0_2_0 : pieceMn 3 1 0 3 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (133 / 375000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_0_18 : aggCoeff 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (4, 0, 2, 0) = (24 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_0_4_0_2_0 : pieceMn 3 1 0 4 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (1609 / 118125000000 : ℚ) := by
++  decide +kernel
++
++theorem agg_S_1_0 : aggPieceOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 3 1 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])]
++    (fun A B m n => pieceMn 3 1 0 A B (3 / 10 : ℚ) 1 (9 / 10) synthC m n) = (97113 / 1093750000 : ℚ) := by
++  simp only [aggPieceOn, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
++    ck_S_1_0_0, mo_3_1_0_0_0_2_0, ck_S_1_0_1, mo_3_1_0_0_0_4_0, ck_S_1_0_2, mo_3_1_0_0_0_6_0, ck_S_1_0_3, mo_3_1_0_0_1_2_0, ck_S_1_0_4, mo_3_1_0_0_1_4_0, ck_S_1_0_5, mo_3_1_0_0_2_2_0, ck_S_1_0_6, mo_3_1_0_0_2_4_0, ck_S_1_0_7, mo_3_1_0_0_3_2_0, ck_S_1_0_8, mo_3_1_0_0_4_2_0, ck_S_1_0_9, mo_3_1_0_1_0_2_0, ck_S_1_0_10, mo_3_1_0_1_0_4_0, ck_S_1_0_11, mo_3_1_0_1_1_2_0, ck_S_1_0_12, mo_3_1_0_1_2_2_0, ck_S_1_0_13, mo_3_1_0_2_0_2_0, ck_S_1_0_14, mo_3_1_0_2_0_4_0, ck_S_1_0_15, mo_3_1_0_2_1_2_0, ck_S_1_0_16, mo_3_1_0_2_2_2_0, ck_S_1_0_17, mo_3_1_0_3_0_2_0, ck_S_1_0_18, mo_3_1_0_4_0_2_0]
++  norm_num
++
++theorem nd_S_1_1 : ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey).Nodup := by decide
++
++theorem cov_S_1_1 : ∀ w ∈ ([((1 : ℚ), 0, [2], 0, [2])] : List (WPair ℚ)), ∀ s ∈ genKeys (3 / 10 : ℚ) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey) := by
++  decide +kernel
++
++theorem ck_S_1_1_0 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 2, 0) = (81 / 2500 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_0_0_2_0 : pieceMn 3 1 1 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (443 / 3000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_1 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 4, 0) = (3 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_0_0_4_0 : pieceMn 3 1 1 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (7459 / 1050000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_2 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 6, 0) = (1 / 9 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_0_0_6_0 : pieceMn 3 1 1 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 6 0 = (15563 / 36000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_3 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 2, 0) = (27 / 125 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_0_1_2_0 : pieceMn 3 1 1 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (3361 / 360000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_4 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 4, 0) = (2 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_0_1_4_0 : pieceMn 3 1 1 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (12359 / 33600000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_5 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 2, 0) = (54 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_0_2_2_0 : pieceMn 3 1 1 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (2057 / 4200000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_6 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 4, 0) = (8 / 3 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_0_2_4_0 : pieceMn 3 1 1 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (17603 / 1080000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_7 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 3, 2, 0) = (48 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_0_3_2_0 : pieceMn 3 1 1 0 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (44407 / 2016000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_8 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 4, 2, 0) = (56 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_0_4_2_0 : pieceMn 3 1 1 0 4 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (15739 / 18144000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_9 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 2, 0) = (27 / 125 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_1_0_2_0 : pieceMn 3 1 1 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (3169 / 360000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_10 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 4, 0) = (2 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_1_0_4_0 : pieceMn 3 1 1 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (60211 / 168000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_11 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 1, 2, 0) = (18 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_1_1_2_0 : pieceMn 3 1 1 1 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (6017 / 12600000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_12 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 2, 2, 0) = (24 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_1_2_2_0 : pieceMn 3 1 1 1 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (43943 / 2016000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_13 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 2, 0) = (36 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_2_0_2_0 : pieceMn 3 1 1 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (1069 / 2520000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_14 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 4, 0) = (4 / 3 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_2_0_4_0 : pieceMn 3 1 1 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (57313 / 3780000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_15 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 1, 2, 0) = (12 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_2_1_2_0 : pieceMn 3 1 1 2 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (41479 / 2016000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_16 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 2, 2, 0) = (16 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_2_2_2_0 : pieceMn 3 1 1 2 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (38137 / 45360000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_17 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (3, 0, 2, 0) = (36 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_3_0_2_0 : pieceMn 3 1 1 3 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (11437 / 672000000000 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_1_18 : aggCoeff 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (4, 0, 2, 0) = (24 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_1_4_0_2_0 : pieceMn 3 1 1 4 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (26377 / 45360000000000 : ℚ) := by
++  decide +kernel
++
++theorem agg_S_1_1 : aggPieceOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 3 1 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])]
++    (fun A B m n => pieceMn 3 1 1 A B (3 / 10 : ℚ) 1 (9 / 10) synthC m n) = (142131319 / 11340000000000 : ℚ) := by
++  simp only [aggPieceOn, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
++    ck_S_1_1_0, mo_3_1_1_0_0_2_0, ck_S_1_1_1, mo_3_1_1_0_0_4_0, ck_S_1_1_2, mo_3_1_1_0_0_6_0, ck_S_1_1_3, mo_3_1_1_0_1_2_0, ck_S_1_1_4, mo_3_1_1_0_1_4_0, ck_S_1_1_5, mo_3_1_1_0_2_2_0, ck_S_1_1_6, mo_3_1_1_0_2_4_0, ck_S_1_1_7, mo_3_1_1_0_3_2_0, ck_S_1_1_8, mo_3_1_1_0_4_2_0, ck_S_1_1_9, mo_3_1_1_1_0_2_0, ck_S_1_1_10, mo_3_1_1_1_0_4_0, ck_S_1_1_11, mo_3_1_1_1_1_2_0, ck_S_1_1_12, mo_3_1_1_1_2_2_0, ck_S_1_1_13, mo_3_1_1_2_0_2_0, ck_S_1_1_14, mo_3_1_1_2_0_4_0, ck_S_1_1_15, mo_3_1_1_2_1_2_0, ck_S_1_1_16, mo_3_1_1_2_2_2_0, ck_S_1_1_17, mo_3_1_1_3_0_2_0, ck_S_1_1_18, mo_3_1_1_4_0_2_0]
++  norm_num
++
++theorem nd_S_1_2 : ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey).Nodup := by decide
++
++theorem cov_S_1_2 : ∀ w ∈ ([((1 : ℚ), 0, [2], 0, [2])] : List (WPair ℚ)), ∀ s ∈ genKeys (3 / 10 : ℚ) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey) := by
++  decide +kernel
++
++theorem ck_S_1_2_0 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 2, 0) = (729 / 10000 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_0_0_2_0 : pieceMn 3 1 2 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_1 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 4, 0) = (9 / 50 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_0_0_4_0 : pieceMn 3 1 2 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_2 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 6, 0) = (1 / 9 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_0_0_6_0 : pieceMn 3 1 2 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 6 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_3 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 2, 0) = (81 / 125 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_0_1_2_0 : pieceMn 3 1 2 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_4 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 4, 0) = (4 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_0_1_4_0 : pieceMn 3 1 2 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_5 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 2, 0) = (108 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_0_2_2_0 : pieceMn 3 1 2 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_6 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 4, 0) = (8 / 3 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_0_2_4_0 : pieceMn 3 1 2 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_7 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 3, 2, 0) = (96 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_0_3_2_0 : pieceMn 3 1 2 0 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_8 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 4, 2, 0) = (56 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_0_4_2_0 : pieceMn 3 1 2 0 4 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_9 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 2, 0) = (81 / 250 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_1_0_2_0 : pieceMn 3 1 2 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_10 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 4, 0) = (2 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_1_0_4_0 : pieceMn 3 1 2 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_11 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 1, 2, 0) = (36 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_1_1_2_0 : pieceMn 3 1 2 1 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_12 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 2, 2, 0) = (24 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_1_2_2_0 : pieceMn 3 1 2 1 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_13 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 2, 0) = (9 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_2_0_2_0 : pieceMn 3 1 2 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_14 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 4, 0) = (4 / 3 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_2_0_4_0 : pieceMn 3 1 2 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_15 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 1, 2, 0) = (24 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_2_1_2_0 : pieceMn 3 1 2 2 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_16 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 2, 2, 0) = (16 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_2_2_2_0 : pieceMn 3 1 2 2 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_17 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (3, 0, 2, 0) = (36 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_3_0_2_0 : pieceMn 3 1 2 3 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_1_2_18 : aggCoeff 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (4, 0, 2, 0) = (24 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_1_2_4_0_2_0 : pieceMn 3 1 2 4 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem agg_S_1_2 : aggPieceOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 3 1 2 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])]
++    (fun A B m n => pieceMn 3 1 2 A B (3 / 10 : ℚ) 1 (9 / 10) synthC m n) = (0 : ℚ) := by
++  simp only [aggPieceOn, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
++    ck_S_1_2_0, mo_3_1_2_0_0_2_0, ck_S_1_2_1, mo_3_1_2_0_0_4_0, ck_S_1_2_2, mo_3_1_2_0_0_6_0, ck_S_1_2_3, mo_3_1_2_0_1_2_0, ck_S_1_2_4, mo_3_1_2_0_1_4_0, ck_S_1_2_5, mo_3_1_2_0_2_2_0, ck_S_1_2_6, mo_3_1_2_0_2_4_0, ck_S_1_2_7, mo_3_1_2_0_3_2_0, ck_S_1_2_8, mo_3_1_2_0_4_2_0, ck_S_1_2_9, mo_3_1_2_1_0_2_0, ck_S_1_2_10, mo_3_1_2_1_0_4_0, ck_S_1_2_11, mo_3_1_2_1_1_2_0, ck_S_1_2_12, mo_3_1_2_1_2_2_0, ck_S_1_2_13, mo_3_1_2_2_0_2_0, ck_S_1_2_14, mo_3_1_2_2_0_4_0, ck_S_1_2_15, mo_3_1_2_2_1_2_0, ck_S_1_2_16, mo_3_1_2_2_2_2_0, ck_S_1_2_17, mo_3_1_2_3_0_2_0, ck_S_1_2_18, mo_3_1_2_4_0_2_0]
++  norm_num
++
++theorem nd_S_2_0 : ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey).Nodup := by decide
++
++theorem cov_S_2_0 : ∀ w ∈ ([((1 : ℚ), 0, [2], 0, [2])] : List (WPair ℚ)), ∀ s ∈ genKeys (3 / 10 : ℚ) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey) := by
++  decide +kernel
++
++theorem ck_S_2_0_0 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 2, 0) = (81 / 2500 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_0_0_2_0 : pieceMn 3 2 0 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_1 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 4, 0) = (3 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_0_0_4_0 : pieceMn 3 2 0 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_2 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 6, 0) = (1 / 9 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_0_0_6_0 : pieceMn 3 2 0 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 6 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_3 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_0_1_2_0 : pieceMn 3 2 0 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_4 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_0_1_4_0 : pieceMn 3 2 0 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_5 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 2, 0) = (18 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_0_2_2_0 : pieceMn 3 2 0 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_6 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 4, 0) = (4 / 3 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_0_2_4_0 : pieceMn 3 2 0 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_7 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 3, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_0_3_2_0 : pieceMn 3 2 0 0 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_8 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 4, 2, 0) = (24 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_0_4_2_0 : pieceMn 3 2 0 0 4 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_9 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 2, 0) = (54 / 125 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_1_0_2_0 : pieceMn 3 2 0 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_10 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 4, 0) = (4 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_1_0_4_0 : pieceMn 3 2 0 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_11 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_1_1_2_0 : pieceMn 3 2 0 1 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_12 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 2, 2, 0) = (24 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_1_2_2_0 : pieceMn 3 2 0 1 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_13 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 2, 0) = (18 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_2_0_2_0 : pieceMn 3 2 0 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_14 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 4, 0) = (8 / 3 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_2_0_4_0 : pieceMn 3 2 0 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_15 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_2_1_2_0 : pieceMn 3 2 0 2 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_16 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 2, 2, 0) = (16 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_2_2_2_0 : pieceMn 3 2 0 2 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_17 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (3, 0, 2, 0) = (96 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_3_0_2_0 : pieceMn 3 2 0 3 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_0_18 : aggCoeff 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (4, 0, 2, 0) = (56 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_0_4_0_2_0 : pieceMn 3 2 0 4 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem agg_S_2_0 : aggPieceOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 3 2 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])]
++    (fun A B m n => pieceMn 3 2 0 A B (3 / 10 : ℚ) 1 (9 / 10) synthC m n) = (0 : ℚ) := by
++  simp only [aggPieceOn, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
++    ck_S_2_0_0, mo_3_2_0_0_0_2_0, ck_S_2_0_1, mo_3_2_0_0_0_4_0, ck_S_2_0_2, mo_3_2_0_0_0_6_0, ck_S_2_0_3, mo_3_2_0_0_1_2_0, ck_S_2_0_4, mo_3_2_0_0_1_4_0, ck_S_2_0_5, mo_3_2_0_0_2_2_0, ck_S_2_0_6, mo_3_2_0_0_2_4_0, ck_S_2_0_7, mo_3_2_0_0_3_2_0, ck_S_2_0_8, mo_3_2_0_0_4_2_0, ck_S_2_0_9, mo_3_2_0_1_0_2_0, ck_S_2_0_10, mo_3_2_0_1_0_4_0, ck_S_2_0_11, mo_3_2_0_1_1_2_0, ck_S_2_0_12, mo_3_2_0_1_2_2_0, ck_S_2_0_13, mo_3_2_0_2_0_2_0, ck_S_2_0_14, mo_3_2_0_2_0_4_0, ck_S_2_0_15, mo_3_2_0_2_1_2_0, ck_S_2_0_16, mo_3_2_0_2_2_2_0, ck_S_2_0_17, mo_3_2_0_3_0_2_0, ck_S_2_0_18, mo_3_2_0_4_0_2_0]
++  norm_num
++
++theorem nd_S_2_1 : ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey).Nodup := by decide
++
++theorem cov_S_2_1 : ∀ w ∈ ([((1 : ℚ), 0, [2], 0, [2])] : List (WPair ℚ)), ∀ s ∈ genKeys (3 / 10 : ℚ) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey) := by
++  decide +kernel
++
++theorem ck_S_2_1_0 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 2, 0) = (729 / 10000 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_0_0_2_0 : pieceMn 3 2 1 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_1 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 4, 0) = (9 / 50 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_0_0_4_0 : pieceMn 3 2 1 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_2 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 6, 0) = (1 / 9 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_0_0_6_0 : pieceMn 3 2 1 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 6 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_3 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 2, 0) = (81 / 250 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_0_1_2_0 : pieceMn 3 2 1 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_4 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 4, 0) = (2 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_0_1_4_0 : pieceMn 3 2 1 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_5 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 2, 0) = (9 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_0_2_2_0 : pieceMn 3 2 1 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_6 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 4, 0) = (4 / 3 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_0_2_4_0 : pieceMn 3 2 1 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_7 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 3, 2, 0) = (36 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_0_3_2_0 : pieceMn 3 2 1 0 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_8 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 4, 2, 0) = (24 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_0_4_2_0 : pieceMn 3 2 1 0 4 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_9 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 2, 0) = (81 / 125 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_1_0_2_0 : pieceMn 3 2 1 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_10 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 4, 0) = (4 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_1_0_4_0 : pieceMn 3 2 1 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_11 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 1, 2, 0) = (36 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_1_1_2_0 : pieceMn 3 2 1 1 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_12 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 2, 2, 0) = (24 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_1_2_2_0 : pieceMn 3 2 1 1 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_13 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 2, 0) = (108 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_2_0_2_0 : pieceMn 3 2 1 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_14 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 4, 0) = (8 / 3 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_2_0_4_0 : pieceMn 3 2 1 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_15 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 1, 2, 0) = (24 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_2_1_2_0 : pieceMn 3 2 1 2 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_16 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 2, 2, 0) = (16 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_2_2_2_0 : pieceMn 3 2 1 2 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_17 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (3, 0, 2, 0) = (96 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_3_0_2_0 : pieceMn 3 2 1 3 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_2_1_18 : aggCoeff 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (4, 0, 2, 0) = (56 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_2_1_4_0_2_0 : pieceMn 3 2 1 4 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem agg_S_2_1 : aggPieceOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 3 2 1 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])]
++    (fun A B m n => pieceMn 3 2 1 A B (3 / 10 : ℚ) 1 (9 / 10) synthC m n) = (0 : ℚ) := by
++  simp only [aggPieceOn, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
++    ck_S_2_1_0, mo_3_2_1_0_0_2_0, ck_S_2_1_1, mo_3_2_1_0_0_4_0, ck_S_2_1_2, mo_3_2_1_0_0_6_0, ck_S_2_1_3, mo_3_2_1_0_1_2_0, ck_S_2_1_4, mo_3_2_1_0_1_4_0, ck_S_2_1_5, mo_3_2_1_0_2_2_0, ck_S_2_1_6, mo_3_2_1_0_2_4_0, ck_S_2_1_7, mo_3_2_1_0_3_2_0, ck_S_2_1_8, mo_3_2_1_0_4_2_0, ck_S_2_1_9, mo_3_2_1_1_0_2_0, ck_S_2_1_10, mo_3_2_1_1_0_4_0, ck_S_2_1_11, mo_3_2_1_1_1_2_0, ck_S_2_1_12, mo_3_2_1_1_2_2_0, ck_S_2_1_13, mo_3_2_1_2_0_2_0, ck_S_2_1_14, mo_3_2_1_2_0_4_0, ck_S_2_1_15, mo_3_2_1_2_1_2_0, ck_S_2_1_16, mo_3_2_1_2_2_2_0, ck_S_2_1_17, mo_3_2_1_3_0_2_0, ck_S_2_1_18, mo_3_2_1_4_0_2_0]
++  norm_num
++
++theorem nd_S_3_0 : ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey).Nodup := by decide
++
++theorem cov_S_3_0 : ∀ w ∈ ([((1 : ℚ), 0, [2], 0, [2])] : List (WPair ℚ)), ∀ s ∈ genKeys (3 / 10 : ℚ) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ ([(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] : List MKey) := by
++  decide +kernel
++
++theorem ck_S_3_0_0 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 2, 0) = (729 / 10000 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_0_0_2_0 : pieceMn 3 3 0 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_1 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 4, 0) = (9 / 50 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_0_0_4_0 : pieceMn 3 3 0 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_2 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 0, 6, 0) = (1 / 9 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_0_0_6_0 : pieceMn 3 3 0 0 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 6 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_3 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_0_1_2_0 : pieceMn 3 3 0 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_4 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 1, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_0_1_4_0 : pieceMn 3 3 0 0 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_5 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_0_2_2_0 : pieceMn 3 3 0 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_6 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 2, 4, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_0_2_4_0 : pieceMn 3 3 0 0 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_7 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 3, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_0_3_2_0 : pieceMn 3 3 0 0 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_8 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (0, 4, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_0_4_2_0 : pieceMn 3 3 0 0 4 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_9 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 2, 0) = (243 / 250 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_1_0_2_0 : pieceMn 3 3 0 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_10 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 0, 4, 0) = (6 / 5 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_1_0_4_0 : pieceMn 3 3 0 1 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_11 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_1_1_2_0 : pieceMn 3 3 0 1 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_12 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (1, 2, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_1_2_2_0 : pieceMn 3 3 0 1 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_13 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 2, 0) = (189 / 25 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_2_0_2_0 : pieceMn 3 3 0 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_14 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 0, 4, 0) = (4 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_2_0_4_0 : pieceMn 3 3 0 2 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 4 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_15 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 1, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_2_1_2_0 : pieceMn 3 3 0 2 1 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_16 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (2, 2, 2, 0) = (0 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_2_2_2_0 : pieceMn 3 3 0 2 2 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_17 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (3, 0, 2, 0) = (36 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_3_0_2_0 : pieceMn 3 3 0 3 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem ck_S_3_0_18 : aggCoeff 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])] (4, 0, 2, 0) = (96 : ℚ) := by
++  decide +kernel
++
++theorem mo_3_3_0_4_0_2_0 : pieceMn 3 3 0 4 0 (3 / 10 : ℚ) 1 (9 / 10) synthC 2 0 = (0 : ℚ) := by
++  decide +kernel
++
++theorem agg_S_3_0 : aggPieceOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 3 3 0 (3 / 10 : ℚ) [((1 : ℚ), 0, [2], 0, [2])]
++    (fun A B m n => pieceMn 3 3 0 A B (3 / 10 : ℚ) 1 (9 / 10) synthC m n) = (0 : ℚ) := by
++  simp only [aggPieceOn, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
++    ck_S_3_0_0, mo_3_3_0_0_0_2_0, ck_S_3_0_1, mo_3_3_0_0_0_4_0, ck_S_3_0_2, mo_3_3_0_0_0_6_0, ck_S_3_0_3, mo_3_3_0_0_1_2_0, ck_S_3_0_4, mo_3_3_0_0_1_4_0, ck_S_3_0_5, mo_3_3_0_0_2_2_0, ck_S_3_0_6, mo_3_3_0_0_2_4_0, ck_S_3_0_7, mo_3_3_0_0_3_2_0, ck_S_3_0_8, mo_3_3_0_0_4_2_0, ck_S_3_0_9, mo_3_3_0_1_0_2_0, ck_S_3_0_10, mo_3_3_0_1_0_4_0, ck_S_3_0_11, mo_3_3_0_1_1_2_0, ck_S_3_0_12, mo_3_3_0_1_2_2_0, ck_S_3_0_13, mo_3_3_0_2_0_2_0, ck_S_3_0_14, mo_3_3_0_2_0_4_0, ck_S_3_0_15, mo_3_3_0_2_1_2_0, ck_S_3_0_16, mo_3_3_0_2_2_2_0, ck_S_3_0_17, mo_3_3_0_3_0_2_0, ck_S_3_0_18, mo_3_3_0_4_0_2_0]
++  norm_num
++
++theorem aggSmall_PP : aggEntryValOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 3 (3 / 10 : ℚ) 1 (9 / 10) synthC [((1 : ℚ), 0, [2], 0, [2])] = (775434251 / 567000000000 : ℚ) := by
++  simp only [aggEntryValOn, Finset.sum_range_succ, Finset.sum_range_zero, Nat.reduceSub, Nat.reduceAdd,
++    agg_S_0_0, agg_S_0_1, agg_S_0_2, agg_S_0_3, agg_S_1_0, agg_S_1_1, agg_S_1_2, agg_S_2_0, agg_S_2_1, agg_S_3_0]
++  norm_num
++
++theorem genEntrySmall_PP : genEntryVal 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 0 [2] 0 [2] = (775434251 / 567000000000 : ℚ) :=
++  (genEntryVal_eq_aggEntryValOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] nd_S_0_0 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 0 [2] 0 [2] cov_S_0_0).trans
++    aggSmall_PP
++
++end BGP212.V2e
+diff --git a/Solution/MomentAggSuite.lean b/Solution/MomentAggSuite.lean
+new file mode 100644
+index 0000000..72925a8
+--- /dev/null
++++ b/Solution/MomentAggSuite.lean
+@@ -0,0 +1,152 @@
++/-
++Copyright (c) 2026 thinkthoughts. All rights reserved.
++Released under MIT license as described in the file LICENSE.
++Source: Axiom Math, "A New Bound for Small Gaps Between Primes", preliminary draft
++(September 3, 2026): Table 3 (p. 39), §9.4, the display of `J_T` (p. 41), §11 (B₂₁, p. 42).
++-/
++import Solution.MomentAgg
++import Solution.MomentAggDemo3
++import Solution.MomentAggDemo4
++
++/-! # V2j: Comparator wrappers (proofs in `Solution/MomentAgg.lean` and the demonstration files) -/
++
++namespace BGP212.Challenge
++
++open BGP212.Gram BGP212.V2d BGP212.V2e BGP212.Params MeasureTheory
++
++theorem stateVal_add {K : Type*} [Field K] (M M' : ℕ → ℕ → K) :
++    ∀ (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K) (A B : ℕ),
++      stateVal (fun A B => M A B + M' A B) d c fs A B =
++        stateVal M d c fs A B + stateVal M' d c fs A B := by
++  apply BGP212.V2e.stateVal_add <;> assumption
++
++theorem stateVal_smul {K : Type*} [Field K] (a : K) (M : ℕ → ℕ → K) :
++    ∀ (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K) (A B : ℕ),
++      stateVal (fun A B => a * M A B) d c fs A B = a * stateVal M d c fs A B := by
++  apply BGP212.V2e.stateVal_smul <;> assumption
++
++theorem placeVal_add {K : Type*} [Field K] (M M' : ℕ → ℕ → K) (n : Fin 3 → ℕ) :
++    ∀ (fac : List (Fin 3 → List K)) (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K),
++      placeVal (fun A B => M A B + M' A B) n d c fs fac =
++        placeVal M n d c fs fac + placeVal M' n d c fs fac := by
++  apply BGP212.V2e.placeVal_add <;> assumption
++
++theorem placeVal_smul {K : Type*} [Field K] (a : K) (M : ℕ → ℕ → K) (n : Fin 3 → ℕ) :
++    ∀ (fac : List (Fin 3 → List K)) (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K),
++      placeVal (fun A B => a * M A B) n d c fs fac = a * placeVal M n d c fs fac := by
++  apply BGP212.V2e.placeVal_smul <;> assumption
++
++theorem genPieceWith_add {K : Type*} [Field K] (N r k : ℕ) (g : K) (Mo Mo' : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ) (l₁ : List ℕ)
++    (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g (fun A B m n => Mo A B m n + Mo' A B m n) a₁ l₁ a₂ l₂ =
++      genPieceWith N r k g Mo a₁ l₁ a₂ l₂ + genPieceWith N r k g Mo' a₁ l₁ a₂ l₂ := by
++  apply BGP212.V2e.genPieceWith_add <;> assumption
++
++theorem genPieceWith_smul {K : Type*} [Field K] (N r k : ℕ) (g : K) (a : K) (Mo : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ)
++    (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g (fun A B m n => a * Mo A B m n) a₁ l₁ a₂ l₂ =
++      a * genPieceWith N r k g Mo a₁ l₁ a₂ l₂ := by
++  apply BGP212.V2e.genPieceWith_smul <;> assumption
++
++theorem genPieceWith_zero {K : Type*} [Field K] (N r k : ℕ) (g : K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g (fun _ _ _ _ => (0 : K)) a₁ l₁ a₂ l₂ = 0 := by
++  apply BGP212.V2e.genPieceWith_zero <;> assumption
++
++theorem genPieceWith_listSum {K : Type*} [Field K] [LinearOrder K] {ι : Type*} (N r k : ℕ) (g : K) (S : List ι) (c : ι → K)
++    (F : ι → ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g (fun A B m n => (S.map fun t => c t * F t A B m n).sum) a₁ l₁ a₂ l₂ =
++      (S.map fun t => c t * genPieceWith N r k g (F t) a₁ l₁ a₂ l₂).sum := by
++  apply BGP212.V2e.genPieceWith_listSum <;> assumption
++
++theorem stateVal_congr {K : Type*} [Field K] (M M' : ℕ → ℕ → K) :
++    ∀ (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K) (A B : ℕ),
++      (∀ p ∈ stateKeys d c fs A B, M p.1 p.2 = M' p.1 p.2) →
++        stateVal M d c fs A B = stateVal M' d c fs A B := by
++  apply BGP212.V2e.stateVal_congr <;> assumption
++
++theorem placeVal_congr {K : Type*} [Field K] (M M' : ℕ → ℕ → K) (n : Fin 3 → ℕ) :
++    ∀ (fac : List (Fin 3 → List K)) (d : ℕ) (c : Fin d → Fin 3) (fs : Fin d → List K),
++      (∀ p ∈ placeKeys d c fs fac, M p.1 p.2 = M' p.1 p.2) →
++        placeVal M n d c fs fac = placeVal M' n d c fs fac := by
++  apply BGP212.V2e.placeVal_congr <;> assumption
++
++theorem genPieceWith_congr {K : Type*} [Field K] [LinearOrder K] (N r k : ℕ) (g : K) (Mo Mo' : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ)
++    (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ)
++    (h : ∀ s ∈ genKeys g a₁ l₁ a₂ l₂, Mo s.1 s.2.1 s.2.2.1 s.2.2.2 = Mo' s.1 s.2.1 s.2.2.1 s.2.2.2) :
++    genPieceWith N r k g Mo a₁ l₁ a₂ l₂ = genPieceWith N r k g Mo' a₁ l₁ a₂ l₂ := by
++  apply BGP212.V2e.genPieceWith_congr <;> assumption
++
++theorem genPieceWith_eq_keys {K : Type*} [Field K] [LinearOrder K] (N r k : ℕ) (g : K) (Mo : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ)
++    (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) (S : List MKey) (hS : S.Nodup)
++    (hcov : ∀ s ∈ genKeys g a₁ l₁ a₂ l₂, s ∈ S) :
++    genPieceWith N r k g Mo a₁ l₁ a₂ l₂ =
++      (S.map fun s => genPieceWith N r k g (delta s) a₁ l₁ a₂ l₂ *
++        Mo s.1 s.2.1 s.2.2.1 s.2.2.2).sum := by
++  apply BGP212.V2e.genPieceWith_eq_keys <;> assumption
++
++theorem genPieceWith_eq_coeffs {K : Type*} [Field K] [LinearOrder K] (N r k : ℕ) (g : K) (Mo : ℕ → ℕ → ℕ → ℕ → K) (a₁ : ℕ)
++    (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ) :
++    genPieceWith N r k g Mo a₁ l₁ a₂ l₂ =
++      ((genCoeffs N r k g a₁ l₁ a₂ l₂).map fun p => p.2 * Mo p.1.1 p.1.2.1 p.1.2.2.1 p.1.2.2.2).sum := by
++  apply BGP212.V2e.genPieceWith_eq_coeffs <;> assumption
++
++theorem aggPieceOn_eq {K : Type*} [Field K] [LinearOrder K] (S : List MKey) (hS : S.Nodup) (N r k : ℕ) (g : K) (ws : List (WPair K))
++    (hcov : ∀ w ∈ ws, ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ S)
++    (Mo : ℕ → ℕ → ℕ → ℕ → K) :
++    aggPieceOn S N r k g ws Mo =
++      (ws.map fun w => w.1 * genPieceWith N r k g Mo w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).sum := by
++  apply BGP212.V2e.aggPieceOn_eq <;> assumption
++
++theorem aggPiece_eq {K : Type*} [Field K] [LinearOrder K] (N r k : ℕ) (g : K) (ws : List (WPair K)) (Mo : ℕ → ℕ → ℕ → ℕ → K) :
++    aggPiece N r k g ws Mo =
++      (ws.map fun w => w.1 * genPieceWith N r k g Mo w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).sum := by
++  apply BGP212.V2e.aggPiece_eq <;> assumption
++
++theorem aggEntryValOn_eq {K : Type*} [Field K] [LinearOrder K] (S : List MKey) (hS : S.Nodup) (N : ℕ) (g L τ : K) (C : ℕ → K)
++    (ws : List (WPair K))
++    (hcov : ∀ w ∈ ws, ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ S) :
++    aggEntryValOn S N g L τ C ws =
++      (ws.map fun w => w.1 * genEntryVal N g L τ C w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).sum := by
++  apply BGP212.V2e.aggEntryValOn_eq <;> assumption
++
++theorem aggEntryVal_eq {K : Type*} [Field K] [LinearOrder K] (N : ℕ) (g L τ : K) (C : ℕ → K) (ws : List (WPair K)) :
++    aggEntryVal N g L τ C ws =
++      (ws.map fun w => w.1 * genEntryVal N g L τ C w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2).sum := by
++  apply BGP212.V2e.aggEntryVal_eq <;> assumption
++
++theorem genPiece_eq_aggPieceOn {K : Type*} [Field K] [LinearOrder K] (S : List MKey) (hS : S.Nodup)
++    (N r k : ℕ) (g L τ : K) (C : ℕ → K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ)
++    (hcov : ∀ w ∈ ([(1, a₁, l₁, a₂, l₂)] : List (WPair K)),
++      ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ S) :
++    genPiece N r k g L τ C a₁ l₁ a₂ l₂ =
++      aggPieceOn S N r k g [(1, a₁, l₁, a₂, l₂)] (fun A B m n => pieceMn N r k A B g L τ C m n) := by
++  apply BGP212.V2e.genPiece_eq_aggPieceOn <;> assumption
++
++theorem genEntryVal_eq_aggEntryValOn {K : Type*} [Field K] [LinearOrder K] (S : List MKey)
++    (hS : S.Nodup) (N : ℕ) (g L τ : K) (C : ℕ → K) (a₁ : ℕ) (l₁ : List ℕ) (a₂ : ℕ) (l₂ : List ℕ)
++    (hcov : ∀ w ∈ ([(1, a₁, l₁, a₂, l₂)] : List (WPair K)),
++      ∀ s ∈ genKeys g w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2, s ∈ S) :
++    genEntryVal N g L τ C a₁ l₁ a₂ l₂ = aggEntryValOn S N g L τ C [(1, a₁, l₁, a₂, l₂)] := by
++  apply BGP212.V2e.genEntryVal_eq_aggEntryValOn <;> assumption
++
++theorem jT_weighted_eq_agg {N : ℕ} (hN : 0 < N) (g L τ : ℝ) (C : ℕ → ℝ) (hg : 0 ≤ g)
++    (hC1 : g ≤ C 1) (hCN : C N - N * g < 0) (ws : List (WPair ℝ)) :
++    (ws.map fun w => w.1 * jTbil N g L τ C (genFun L w.2.1 w.2.2.1) (genFun L w.2.2.2.1 w.2.2.2.2)).sum =
++      aggEntryVal N g L τ C ws := by
++  apply BGP212.V2e.jT_weighted_eq_agg <;> assumption
++
++theorem genPiecePP_6_3_viaAgg : genPiece 44 6 3 g L τ C 0 [2] 0 [2] = (131137324816032597206337084670791861367797826223071138605212410307363604674514849122712053237683605204139308010564930821851425446428402597303 / 3329626726358813710105275696049091166319247197034093404631815321345402691587029260565470945021360194004955701529979705810546875000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  apply BGP212.V2e.genPiecePP_6_3_viaAgg <;> assumption
++
++theorem agg4_6_3_eq : (List.map (fun w : WPair ℚ => w.1 * genPieceWith 44 6 3 g
++    (fun A B m n => pieceMn 44 6 3 A B g L τ C m n) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2) [((1 : ℚ), 0, [2], 0, [2]), ((1 : ℚ), 0, [4], 0, []), ((1 : ℚ), 0, [2, 2], 0, []), ((1 : ℚ), 1, [], 0, [])]).sum =
++    (72121648658152103771075998445448222548953334339394094445742959230265568635264428681768782928376283012297999592355903824370683099662114760933 / 138734446931617237921053154002045465263301966543087225192992305056058445482792885856894622709223341416873154230415821075439453125000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 : ℚ) := by
++  apply BGP212.V2e.agg4_6_3_eq <;> assumption
++
++theorem aggSmall_PP : aggEntryValOn [(0, 0, 2, 0), (0, 0, 4, 0), (0, 0, 6, 0), (0, 1, 2, 0), (0, 1, 4, 0), (0, 2, 2, 0), (0, 2, 4, 0), (0, 3, 2, 0), (0, 4, 2, 0), (1, 0, 2, 0), (1, 0, 4, 0), (1, 1, 2, 0), (1, 2, 2, 0), (2, 0, 2, 0), (2, 0, 4, 0), (2, 1, 2, 0), (2, 2, 2, 0), (3, 0, 2, 0), (4, 0, 2, 0)] 3 (3 / 10 : ℚ) 1 (9 / 10) synthC [((1 : ℚ), 0, [2], 0, [2])] = (775434251 / 567000000000 : ℚ) := by
++  apply BGP212.V2e.aggSmall_PP <;> assumption
++
++theorem genEntrySmall_PP : genEntryVal 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 0 [2] 0 [2] = (775434251 / 567000000000 : ℚ) := by
++  apply BGP212.V2e.genEntrySmall_PP <;> assumption
++
++end BGP212.Challenge
+diff --git a/specs/checks/moment_agg_v2j_demo.py b/specs/checks/moment_agg_v2j_demo.py
+new file mode 100644
+index 0000000..c68316b
+--- /dev/null
++++ b/specs/checks/moment_agg_v2j_demo.py
+@@ -0,0 +1,214 @@
++#!/usr/bin/env python3
++"""Emit V2j's kernel demonstration (Solution/MomentAggDemo1.lean … MomentAggDemo4.lean; evaluations
++and assemblies in separate files so that each `lean` process stays within memory).
++
++The certificate is staged so that every kernel evaluation is a separate declaration:
++  * `nd_*`, `cov_*`: the key list S is duplicate-free and contains every queried key
++    (`decide`; these are the hypotheses of `aggPieceOn_eq`);
++  * `ck_*`: the collapsed coefficient `aggCoeff … s` of each key (no moment is evaluated);
++  * `mo_*`: each distinct moment `pieceMn … s`, evaluated once, directly from V2f's cells;
++  * `agg_*`: the aggregated sum `aggPieceOn S …` assembled from those numerals (`norm_num`);
++  * the link to V2i through `aggPieceOn_eq`.
++
++Demonstrations:
++  * piece (r, k) = (6, 3) at Table 3, J_T[P₂, P₂]: 19 moments; the resulting statement is V2i's
++    certified `gpPP_6_3` (checked by `rfl` on the proofs, i.e. identical statements), recomputed
++    independently of V2h's moment lemmas;
++  * the same piece for V2i's four entries together (PP, P4, P22, LP): 21 shared keys, 2 new
++    moments, equal to the sum of the four V2i piece values;
++  * synthetic N = 3: every piece of J_T[P₂, P₂], then the whole entry `aggEntryValOn`, equal to V2h's
++    synthetic value, and V2i's `genEntryVal` through `aggEntryValOn_eq`.
++
++Usage: python3 -I specs/checks/moment_agg_v2j_demo.py [outdir]
++"""
++import os
++import re
++import sys
++from fractions import Fraction as Fr
++from math import comb
++
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++import gen_entry_v2i_model as Q  # noqa: E402
++
++ENTRIES = [("PP", (0, [2], 0, [2])), ("P4", (0, [4], 0, [])), ("P22", (0, [2, 2], 0, [])),
++           ("LP", (1, [], 0, []))]
++
++
++def lit(x):
++    x = Fr(x)
++    return f"({x.numerator} : ℚ)" if x.denominator == 1 else f"({x.numerator} / {x.denominator} : ℚ)"
++
++
++def ll(l):
++    return "[" + ", ".join(map(str, l)) + "]"
++
++
++def wl(entries):
++    return "[" + ", ".join(f"((1 : ℚ), {a1}, {ll(l1)}, {a2}, {ll(l2)})" for _, (a1, l1, a2, l2) in entries) + "]"
++
++
++def klist(ks):
++    return "[" + ", ".join(f"({a}, {b}, {m}, {n})" for (a, b, m, n) in ks) + "]"
++
++
++def coeff(r, k, entries, s):
++    return sum(Q.genPiece(r, k, *args, Mo=lambda A, B, m, n: Fr(1) if (A, B, m, n) == s else Fr(0))
++               for _, args in entries)
++
++
++def keyset(entries):
++    ks = set()
++    for _, args in entries:
++        ks |= set(Q.keys(*args))
++    return sorted(ks)
++
++
++def piece_block(tag, r, k, entries, N, gL, dataL, mo_names, out, asm_out=None):
++    """Emit coefficient lemmas, missing moment lemmas, and the assembly for one piece."""
++    ks = keyset(entries)
++    S = klist(ks)
++    ws = wl(entries)
++    out.append(f"theorem nd_{tag} : ({S} : List MKey).Nodup := by decide\n")
++    out.append(f"theorem cov_{tag} : ∀ w ∈ ({ws} : List (WPair ℚ)), ∀ s ∈ genKeys {gL} w.2.1 w.2.2.1 "
++               f"w.2.2.2.1 w.2.2.2.2, s ∈ ({S} : List MKey) := by\n  decide +kernel\n")
++    names = []
++    total = Fr(0)
++    for i, s in enumerate(ks):
++        c = coeff(r, k, entries, s)
++        out.append(f"theorem ck_{tag}_{i} : aggCoeff {N} {r} {k} {gL} {ws} {s} = {lit(c)} := by\n  decide +kernel\n")
++        names.append(f"ck_{tag}_{i}")
++        key = (N, r, k, s)
++        if key not in mo_names:
++            v = Q.pieceMn(r, k, *s)
++            nm = f"mo_{N}_{r}_{k}_{s[0]}_{s[1]}_{s[2]}_{s[3]}"
++            out.append(f"theorem {nm} : pieceMn {N} {r} {k} {s[0]} {s[1]} {gL} {dataL} {s[2]} {s[3]} = "
++                       f"{lit(v)} := by\n  decide +kernel\n")
++            mo_names[key] = (nm, v)
++        names.append(mo_names[key][0])
++        total += c * mo_names[key][1]
++    asm = (f"theorem agg_{tag} : aggPieceOn {S} {N} {r} {k} {gL} {ws}\n"
++               f"    (fun A B m n => pieceMn {N} {r} {k} A B {gL} {dataL} m n) = {lit(total)} := by\n"
++               f"  simp only [aggPieceOn, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,\n"
++               f"    {', '.join(names)}]\n  norm_num\n")
++    if asm_out is None:
++        out.append(asm)
++    else:
++        asm_out.append(asm)
++    return S, ws, total
++
++
++HDR = """/-
++Copyright (c) 2026 thinkthoughts. All rights reserved.
++Released under MIT license as described in the file LICENSE.
++Source: Axiom Math, "A New Bound for Small Gaps Between Primes", preliminary draft
++(September 3, 2026): Table 3 (p. 39), §9.4, the display of `J_T` (p. 41).
++-/
++import Solution.MomentAgg
++import Solution.GenEntryCert6
++
++/-! # V2j: kernel demonstration of shared-moment aggregation
++
++COMPUTATIONAL DEMONSTRATION (generated by `specs/checks/moment_agg_v2j_demo.py`). Every kernel
++evaluation is its own declaration: key-list hypotheses (`nd_*`, `cov_*`), collapsed coefficients
++(`ck_*`), each distinct moment once (`mo_*`, directly from `pieceMn`), the aggregated sums
++(`agg_*`), then V2j's `aggPieceOn_eq` / `aggEntryValOn_eq` give V2i's values.
++
++* `genPiecePP_6_3_viaAgg` recomputes V2i's certified piece value `gpPP_6_3` (same statement,
++  `genPiecePP_6_3_same_as_v2i`) from 19 moments, without V2h's moment lemmas;
++* `agg4_6_3_eq` evaluates V2i's four entries on that piece from 21 shared keys;
++* `genEntrySmall_PP` is `J_T[P₂, P₂]` on synthetic data `N = 3` (V2h's synthetic value). -/
++
++namespace BGP212.V2e
++
++open BGP212.Params
++
++"""
++
++HDR2 = """/-
++Copyright (c) 2026 thinkthoughts. All rights reserved.
++Released under MIT license as described in the file LICENSE.
++Source: Axiom Math, "A New Bound for Small Gaps Between Primes", preliminary draft
++(September 3, 2026): Table 3 (p. 39), §9.4, the display of `J_T` (p. 41).
++-/
++import {prev}
++
++/-! # V2j: kernel demonstration of shared-moment aggregation (continued)
++
++COMPUTATIONAL DEMONSTRATION (generated by `specs/checks/moment_agg_v2j_demo.py`); see
++`Solution/MomentAggDemo1.lean`. -/
++
++namespace BGP212.V2e
++
++open BGP212.Params
++
++"""
++
++
++def main():
++    out_dir = sys.argv[1] if len(sys.argv) > 1 else "Solution"
++    here = os.path.dirname(os.path.abspath(__file__))
++    cert = open(os.path.join(here, "../../Solution/GenEntryCert6.lean")).read()
++    v2i = {}
++    for name, args in ENTRIES:
++        m = re.search(rf"theorem gp{name}_6_3 : genPiece[^=]*= \((\d+(?: / \d+)?) : ℚ\)", cert)
++        v2i[name] = Fr(m.group(1).replace(" ", ""))
++    out = [HDR]
++    mo = {}
++    files = []
++    nxt = [HDR2.format(prev="Solution.MomentAggDemo1")]
++    S1, ws1, t1 = piece_block("PP_6_3", 6, 3, ENTRIES[:1], 44, "g", "L τ C", mo, out, nxt)
++    assert t1 == v2i["PP"]
++    out.append("end BGP212.V2e\n")
++    files.append(out)
++    out = nxt
++    out.append(f"""theorem genPiecePP_6_3_viaAgg : genPiece 44 6 3 g L τ C 0 [2] 0 [2] = {lit(t1)} :=
++  (genPiece_eq_aggPieceOn {S1} nd_PP_6_3 44 6 3 g L τ C 0 [2] 0 [2] cov_PP_6_3).trans agg_PP_6_3
++
++/-- The recomputation proves exactly V2i's certified statement `gpPP_6_3`. -/
++theorem genPiecePP_6_3_same_as_v2i : genPiecePP_6_3_viaAgg = gpPP_6_3 := rfl
++""")
++    nxt = [HDR2.format(prev="Solution.MomentAggDemo2")]
++    S4, ws4, t4 = piece_block("ALL_6_3", 6, 3, ENTRIES, 44, "g", "L τ C", mo, out, nxt)
++    assert t4 == sum(v2i.values())
++    out.append("end BGP212.V2e\n")
++    files.append(out)
++    out = nxt
++    out.append(f"""/-- The four V2i entries on piece `(6, 3)`: `Σ_{{w ∈ ws}} w · genPieceWith … = …` from 21 shared keys. -/
++theorem agg4_6_3_eq : (List.map (fun w : WPair ℚ => w.1 * genPieceWith 44 6 3 g
++    (fun A B m n => pieceMn 44 6 3 A B g L τ C m n) w.2.1 w.2.2.1 w.2.2.2.1 w.2.2.2.2) {ws4}).sum =
++    {lit(t4)} :=
++  (aggPieceOn_eq {S4} nd_ALL_6_3 44 6 3 g {ws4} cov_ALL_6_3
++    (fun A B m n => pieceMn 44 6 3 A B g L τ C m n)).symm.trans agg_ALL_6_3
++""")
++    out.append("end BGP212.V2e\n")
++    files.append(out)
++    out = [HDR2.format(prev="Solution.MomentAgg")]
++    CS = [Fr(0), Fr(1, 2), Fr(3, 5), Fr(7, 10)]
++    Q.setdata(3, Fr(3, 10), Fr(1), Fr(9, 10), lambda m: CS[min(m, 3)])
++    pieces = [(r, k) for r in range(4) for k in range(4 - r)]
++    vals = {}
++    Ss = wsS = None
++    for (r, k) in pieces:
++        Ss, wsS, v = piece_block(f"S_{r}_{k}", r, k, ENTRIES[:1], 3, "(3 / 10 : ℚ)", "1 (9 / 10) synthC", mo, out)
++        vals[(r, k)] = v
++    small = 4 * sum(comb(3, r) * comb(3 - r, k) * (-1) ** k * vals[(r, k)] for (r, k) in pieces)
++    names = ", ".join(f"agg_S_{r}_{k}" for (r, k) in pieces)
++    out.append(f"""theorem aggSmall_PP : aggEntryValOn {Ss} 3 (3 / 10 : ℚ) 1 (9 / 10) synthC {wsS} = {lit(small)} := by
++  simp only [aggEntryValOn, Finset.sum_range_succ, Finset.sum_range_zero, Nat.reduceSub, Nat.reduceAdd,
++    {names}]
++  norm_num
++
++theorem genEntrySmall_PP : genEntryVal 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 0 [2] 0 [2] = {lit(small)} :=
++  (genEntryVal_eq_aggEntryValOn {Ss} nd_S_0_0 3 (3 / 10 : ℚ) 1 (9 / 10) synthC 0 [2] 0 [2] cov_S_0_0).trans
++    aggSmall_PP
++""")
++    out.append("end BGP212.V2e\n")
++    files.append(out)
++    for i, f in enumerate(files, 1):
++        open(os.path.join(out_dir, f"MomentAggDemo{i}.lean"), "w").write("\n".join(f))
++    print("wrote", out_dir, "| moments evaluated:", len(mo), "| PP piece", float(t1), "| four entries",
++          float(t4), "| synthetic J[P2,P2]", float(small))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/specs/paper/THEOREMS.md b/specs/paper/THEOREMS.md
+index 141de73..a9dd537 100644
+--- a/specs/paper/THEOREMS.md
++++ b/specs/paper/THEOREMS.md
+@@ -367,6 +367,32 @@ The general closed form reproduces V2h's separately certified $J_T[P_2,P_2]$ exa
+ 
+ **Verification and computational scope:** The full **33-statement V2i Comparator suite** ended with `Lean default kernel accepts the solution` in the development container (13,997 s, replaying V2h's reused moments). The statement-level negative control (`genEntry_eq` with a doubled right side) was rejected. Of the eight Lean controls, four positive were accepted and four negative rejected. Monte Carlo at $N=44$ gave $z=0.52$, $0.38$ and $1.06$. The certificate build took 1,543 s (peak 3.89 GB). V2i proves the exact representation of every $B_{21}$ entry; evaluating further entries requires their moment tables. The $846\times846$ matrices, $P^\star$ and the variational certificate remain targets.
+ 
++## 13. Shared-moment aggregation of Gram entries (V2j)
++
++**Lean:** `Solution/MomentAgg.lean`, `Solution/MomentAggDemo1.lean` through `Solution/MomentAggDemo4.lean`, `Solution/MomentAggSuite.lean`  
++**Definitions:** `BGP212/MomentAgg.lean`  
++**Challenge and Comparator:** `Challenge/MomentAgg.lean`, `Comparator/moment_agg_v2j.json`  
++**Specification and generator:** `Exploratory/V2j/SPEC.md`, `specs/checks/moment_agg_v2j_demo.py`  
++**Result record:** `specs/results/V2j_moment_agg.yaml`
++
++**Linearity and locality.** V2i's piece value is linear in its moment oracle and reads it only at a computable, duplicate-free key list (`genPieceWith_listSum`, `genPieceWith_congr`). Hence, for any duplicate-free key list $S$ covering those keys,
++
++$$
++\texttt{genPieceWith}\,(\dots)\,M\,(\dots)=\sum_{s\in S}\texttt{genPieceWith}\,(\dots)\,\delta_s\,(\dots)\cdot M(s).
++$$
++
++**Aggregation.** For weighted generator pairs $w=(c,a_1,\lambda_1,a_2,\lambda_2)$, coefficients are collected per moment key across all pairs before any moment is evaluated. Then
++
++$$
++\sum_w c\,J_T[G_{a_1,\lambda_1},G_{a_2,\lambda_2}]=\texttt{aggEntryVal}\,N\,g\,L\,\tau\,C\,ws ,
++$$
++
++and each distinct moment is evaluated once per piece (`aggEntryVal_eq`, `jT_weighted_eq_agg`). This is the algebraic shape of $J_T(P^\star)=\sum_{i,j}c_ic_jJ_T[G_i,G_j]$.
++
++**Demonstration (kernel).** Piece $(6,3)$ of $J_T[P_2,P_2]$ at Table 3 is recomputed from 19 moments. V2i's direct form makes 115 oracle queries. The result proves exactly V2i's certified statement `gpPP_6_3`, now independent of V2h's moment lemmas. V2i's four entries on that piece come from 21 shared keys instead of 50. On synthetic data, $J_T[P_2,P_2]=0.00136761$ (V2h's value). Direct single-declaration kernel evaluation exhausts memory; the staged certificates complete in 90, 20, 4 and 81 s.
++
++**Scope:** V2j establishes the aggregation identities and the evaluation pattern. The symmetric-function reduction needed for many-part power-sum products, the $846\times846$ matrices, $P^\star$ and the variational certificate remain targets (`Exploratory/V2j/SPEC.md` §5–6).
++
+ ## Formal verification and provenance
+ 
+ - **Source:** [`thinkthoughts/lean-bgp212`](https://github.com/thinkthoughts/lean-bgp212)
+diff --git a/specs/results/V2j_moment_agg.yaml b/specs/results/V2j_moment_agg.yaml
+new file mode 100644
+index 0000000..82215e5
+--- /dev/null
++++ b/specs/results/V2j_moment_agg.yaml
+@@ -0,0 +1,73 @@
++# Result record: twenty-second Challenge/Solution pair (V2j, shared-moment aggregation of marginal Gram entries)
++
++identity:
++  id: V2j
++  statement: "V2i's piece value genPieceWith is linear in the moment oracle and reads it only at genKeys; for any duplicate-free key list S covering the queried keys it equals Σ_{s ∈ S} genPieceWith (delta s) · Mo s. For a weighted list ws of generator pairs, aggEntryVal N g L τ C ws (coefficients collected per key across all pairs, each distinct moment evaluated once per piece) equals Σ_{(w, a₁, l₁, a₂, l₂) ∈ ws} w · genEntryVal N g L τ C a₁ l₁ a₂ l₂, hence Σ w · J_T[G_{a₁,l₁}, G_{a₂,l₂}]"
++  source: "Source/bgp212.pdf: Table 3 (p. 39), §9.4, the display of J_T (p. 41), §11 (B₂₁, p. 42)"
++  builds_on: "V2i (genPieceWith, genEntryVal, stateVal, placeVal, coordSum, innerTerms, pieceMn, genEntry_eq, placeVal_zero, gpPP_6_3); V2f–V2h cell definitions; A0–V2i unchanged"
++  base_commits: "V2i snapshot 841dd05 (V2i patch applied to c22e4dc); V2i's VPS verification is reported separately and is not assumed here"
++
++state:
++  mathematical: proved
++  computational: kernel-verified demonstration
++  provenance: pinned
++  publication: draft
++
++scope:
++  proved: >
++    stateVal_add, stateVal_smul, placeVal_add, placeVal_smul, genPieceWith_add, genPieceWith_smul,
++    genPieceWith_zero, genPieceWith_listSum (linearity in the oracle); stateVal_congr,
++    placeVal_congr, genPieceWith_congr (locality: only the keys stateKeys, placeKeys, genKeys are
++    read); genPieceWith_eq_keys, genPieceWith_eq_coeffs (coefficient collapse); aggPieceOn_eq,
++    aggPiece_eq, aggEntryValOn_eq, aggEntryVal_eq (aggregation across weighted generator pairs);
++    genPiece_eq_aggPieceOn, genEntryVal_eq_aggEntryValOn (term-mode bridges for certificates);
++    jT_weighted_eq_agg (Σ w · J_T[…] = aggEntryVal, every N ≥ 1 and admissible data).
++  demonstration: >
++    Solution/MomentAggDemo1–4.lean (generated by specs/checks/moment_agg_v2j_demo.py), staged
++    certificates: genPiecePP_6_3_viaAgg (piece (6, 3) of J_T[P₂, P₂] at Table 3 from 19 moments,
++    the same statement as V2i's gpPP_6_3, genPiecePP_6_3_same_as_v2i := rfl), agg4_6_3_eq (V2i's four
++    entries on that piece from 21 shared keys), aggSmall_PP and genEntrySmall_PP (synthetic N = 3:
++    J_T[P₂, P₂] = V2h's synthetic value 0.00136761 as a rational).
++  unproved_assumptions: "none (axioms: propext, Quot.sound, Classical.choice)"
++  outside_V2j: >
++    The symmetric-function reduction replacing set-partition placement for many-part μ, the
++    boxVal-level collapse, the 846 × 846 matrices, P⋆ and J_T(P⋆) − 4 I_T(P⋆) (Exploratory/V2j/SPEC.md §5–6).
++
++verification:
++  definitions: BGP212/MomentAgg.lean
++  challenge: Challenge/MomentAgg.lean
++  solution: [Solution/MomentAgg.lean, Solution/MomentAggDemo1.lean, Solution/MomentAggDemo2.lean, Solution/MomentAggDemo3.lean, Solution/MomentAggDemo4.lean, Solution/MomentAggSuite.lean]
++  comparator_config: Comparator/moment_agg_v2j.json
++  demonstration_generator: specs/checks/moment_agg_v2j_demo.py
++  specification: Exploratory/V2j/SPEC.md
++  measurements:
++    oracle_queries_vs_keys: "per piece: J[P₂,P₂] 115 → 19; J[P₄,1] 16 → 10; J[P_(2,2),1] 115 → 19; J[L−P₁,1] 2 → 2; J[P_(2,2),P₂] 1 471 → 44; J[(L−P₁)P₂,(L−P₁)P₂] 460 → 57; J[P_(2,2),P_(2,2)] 20 542 → 85; the four V2i entries together 248 → 21"
++    kernel_direct: "genPiece 44 6 3 … 0 [2] 0 [2] by one decide +kernel (115 moment evaluations): out of memory (5.88 GB at 63 s); V2i's synthetic genEntryVal 3 … 0 [2] 0 [2]: out of memory (5.88 GB at 155 s)"
++    elaboration_note: "rewriting a certificate goal with rw [← h] (h from aggPieceOn_eq) unfolded genPieceWith during matching and exhausted memory (5.87 GB at 65 s); the term-mode bridges avoid it"
++    kernel_single_pass_aggregated: "aggPieceOn with a literal key list in one decide +kernel: out of memory (5.88 GB at 54 s for piece (6, 3); 41 s for the synthetic entry); the kernel keeps intermediate results within a declaration, hence staging"
++    kernel_staged_aggregated: "piece (6, 3): 19 moment declarations 2.3–12.4 s each (84 s in total including the 19 coefficient declarations, each under 0.5 s, and the key-list checks, 0.3 s); demonstration builds (one lean process per file): MomentAggDemo1 (key checks, 19 coefficients, 19 moments for piece (6, 3)) 89.8 s, peak 4.66 GB; MomentAggDemo2 (assembly and link for J_T[P₂,P₂], 21 coefficients and 2 new moments for the four entries) 20.0 s, peak 3.73 GB; MomentAggDemo3 (assembly for the four entries) 3.8 s; MomentAggDemo4 (synthetic N = 3, 10 pieces × 19 moments, assemblies, whole entry) 80.8 s, peak 4.17 GB; generator: 211 moment evaluations in total"
++    key_enumeration: "genKeys in the kernel: 19 keys (J[P₂,P₂]) and 85 keys (J[P_(2,2),P_(2,2)]) each under 0.1 s; aggKeys of the four V2i entries: 21"
++    b21_collapse_counts: "exact model over all 846 generators: 75 419 inner terms → 4 317 distinct (parts, power of U, power of L − S); 170 657 distinct integrands (μ, m, n) for J_T(P⋆), 2 361 multisets μ with up to 20 parts"
++  axioms_used: [propext, Quot.sound, Classical.choice]
++  trusted_base: "Lean 4 kernel + core + Mathlib (Track B, pinned 85e3a25)"
++  controls:
++    - change: "aggEntryVal_eq stated with 2 * (Σ w · genEntryVal …) on the right in the Challenge, checked with a configuration naming only aggEntryVal_eq"
++      result: "rejected: 'Challenge and solution theorem statement do not match: BGP212.Challenge.aggEntryVal_eq'"
++    - change: "agreement with earlier certificates (positive controls, in the kernel)"
++      result: "genPiecePP_6_3_viaAgg proves V2i's statement gpPP_6_3 (genPiecePP_6_3_same_as_v2i := rfl); agg4_6_3_eq equals the sum of V2i's four certified piece values; genEntrySmall_PP equals V2h's synthetic J_T[P₂,P₂] = 0.00136761"
++  resources:
++    proof_module: "Solution/MomentAgg.lean elaborates in about 15 s"
++    comparator_suite: "277 s for the 24-statement suite in the build container, peak 3.21 GB (Lean default kernel accepts the solution)"
++
++result:
++  toolchain: leanprover/lean4:v4.34.0-rc2
++  mathlib: 85e3a25
++  run_date: 2026-10-22
++  commit_hash: PENDING_VPS
++
++next_development:
++  symmetric_reduction: "replace set-partition placement by the class power-sum → monomial-symmetric transition (partitions of degree ≤ 42), proved equal to genPieceWith"
++  boxval_collapse: "a boxVal-oracle form of cellsVal, with linearity and locality as for the moment oracle; certificates evaluating each boxVal once"
++  variational: "inner-term collapse (75 419 → 4 317) and integrand collapse (170 657 integrands) for J_T(P⋆), then I_T(P⋆) from V2c"
++
++footer: Admissible generalizations trail leading specifications.
+diff --git a/verify.sh b/verify.sh
+index 73cf052..440d22e 100755
+--- a/verify.sh
++++ b/verify.sh
+@@ -9,7 +9,7 @@ COMPARATOR_LANDRUN="${COMPARATOR_LANDRUN:-$HOME/landrun/landrun}"
+ COMPARATOR_LEAN4EXPORT="${COMPARATOR_LEAN4EXPORT:-$HOME/comparator/.lake/packages/lean4export/.lake/build/bin/lean4export}"
+ COMPARATOR_BIN="${COMPARATOR_BIN:-$HOME/comparator/.lake/build/bin/comparator}"
+ 
+-for config in Comparator/lemma_12_1.json Comparator/appendix_b.json Comparator/a2_combinatorial.json Comparator/multishift.json Comparator/multishift_b2.json Comparator/packing_a3a.json Comparator/packing_a3b.json Comparator/packing_a3c.json Comparator/theorem_7_11.json Comparator/final_deduction.json Comparator/variational_v0.json Comparator/simplex_moment_v1.json Comparator/gram_entry_v2b.json Comparator/gram_general_v2c.json Comparator/fibre_v2d.json Comparator/aggregate_v2e.json Comparator/capcell_v2eb.json Comparator/marginal_entry_v2f.json Comparator/power_sum_entry_v2g.json Comparator/power_sum_square_v2h.json Comparator/gen_entry_v2i.json; do
++for config in Comparator/lemma_12_1.json Comparator/appendix_b.json Comparator/a2_combinatorial.json Comparator/multishift.json Comparator/multishift_b2.json Comparator/packing_a3a.json Comparator/packing_a3b.json Comparator/packing_a3c.json Comparator/theorem_7_11.json Comparator/final_deduction.json Comparator/variational_v0.json Comparator/simplex_moment_v1.json Comparator/gram_entry_v2b.json Comparator/gram_general_v2c.json Comparator/fibre_v2d.json Comparator/aggregate_v2e.json Comparator/capcell_v2eb.json Comparator/marginal_entry_v2f.json Comparator/power_sum_entry_v2g.json Comparator/power_sum_square_v2h.json Comparator/gen_entry_v2i.json Comparator/moment_agg_v2j.json; do
+   echo "== $config"
+   COMPARATOR_LANDRUN="$COMPARATOR_LANDRUN" \
+   COMPARATOR_LEAN4EXPORT="$COMPARATOR_LEAN4EXPORT" \
+-- 
+2.43.0
+
