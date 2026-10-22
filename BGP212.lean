@@ -20,3 +20,5 @@ import BGP212.MarginalEntry
 import BGP212.PowerSumEntry
 import BGP212.PowerSumSquare
 import BGP212.PowerSumPlace
+import BGP212.GenEntry
+import BGP212.GenEntryBlock

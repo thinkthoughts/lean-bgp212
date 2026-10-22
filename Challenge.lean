@@ -18,3 +18,4 @@ import Challenge.CapCell
 import Challenge.MarginalEntry
 import Challenge.PowerSumEntry
 import Challenge.PowerSumSquare
+import Challenge.GenEntry

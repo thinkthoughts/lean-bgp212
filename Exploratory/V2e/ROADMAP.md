@@ -6,7 +6,8 @@ Status:
 - **V2f is proved** (eighteenth pair, `Solution/MarginalEntry.lean`): all branches and the first marginal Gram entry `J_T[1, 1]`, see §4.
 - **V2g is proved** (nineteenth pair, `Solution/PowerSumEntry.lean`): the bilinear `J_T` form, single-coordinate placement, and the power-sum entry `J_T[P₂, 1]`, see §6.
 - **V2h is proved** (twentieth pair, `Solution/PowerSumSquare.lean`): monomial weights as moments, two-coordinate placement, and the entry `J_T[P₂, P₂]`, see §8.
-- This file is the plan for the remaining `J_T` entries and certificates (§7, §9).
+- **V2i is proved** (twenty-first pair, `Solution/GenEntry.lean`): every `J_T` entry of `B₂₁` generators in closed form, four Table 3 entries evaluated, see §10.
+- This file is the plan for the remaining `J_T` entries and certificates (§7, §11).
 - Statements marked *exploratory* were checked numerically, not in the kernel.
 
 ## 1. What V2e-A provides (kernel-checked)
@@ -276,7 +277,7 @@ nearly parallel to `1`. If the same holds across `B₂₁`, the `J_T` Gram matri
 and the certificate for `J_T(P⋆) − 4 I_T(P⋆)` must stay exact, as the twelve-digit cancellation in
 V2g already indicated (an expectation, not checked beyond this 2 × 2 block).
 
-## 9. After V2h
+## 9. After V2h (items 1–2 done in V2i, §10)
 
 1. **The general generator `(L − P₁)^a P_λ`.** `piece_mono` already integrates every monomial; what
    remains is the expansion of `∏ (P̂_q + u^q)` with `|λ|` distinguished coordinates, their set
@@ -288,3 +289,74 @@ V2g already indicated (an expectation, not checked beyond this 2 × 2 block).
    `(m, n)`, not one per entry (calibration in §7: about 3 s per moment at `m = 2`, rising with
    `m`).
 3. **The collapsed per-cell certificate for `J_T(P⋆) − 4 I_T(P⋆)`**, following §7.
+
+## 10. V2i: general entries `J_T[G_{a,λ}, G_{b,μ}]` (done)
+
+**Inner integrals.** With `M = L − Σ x̂`,
+
+```text
+∫₀^U (M − u)^a ∏_{q ∈ λ} (P̂_q + u^q) du = Σ_{T ⊆ λ} P̂_{λ∖T} Σ_{j ≤ a} C(a, j) (−1)^j M^{a−j} U^{s_T+j+1} / (s_T+j+1)
+```
+
+(`inner_genFun`, `innerTerms`). After the translation of a piece, `M` is V2f's `L − S`, so every
+entry is a combination of `∫_{piece} P̂_Q(y + s) U^m (L − S)^n`; `piece_mono_n` makes every monomial
+weight against that block a moment `pieceMn … A B m n`.
+
+**Placement without set partitions.** `P̂_q(y + s) = Σᵢ φ_q(yᵢ, cls i)` with `φ_q(y, c) = (y + σ_c)^q`
+a coefficient list. `piece_place` integrates `∏_j f_j(y_{is j}) ∏_φ Σᵢ φ(cls i)(yᵢ)` for distinct open
+coordinates `is` by induction on the factors: a factor either merges into an open coordinate
+(`lpMul`) or opens a coordinate of class `c`, and the new coordinates of class `c` number
+`n_c − #(open in c)`. Unrolled, this enumerates the set partitions of the factors with
+falling-factorial class counts; in Lean it is one induction, with `piece_state` (open coordinates
+with polynomial weights, an induction on their number) as the base.
+
+**Exact representation.** `genEntry_eq`: `J_T[G_{a₁,λ₁}, G_{a₂,λ₂}] = genEntryVal N g L τ C a₁ λ₁ a₂ λ₂`
+for every `N ≥ 1` and admissible data; `jT_gen_table3`: at Table 3 every `B₂₁` entry is the rational
+`genEntryVal 44 …`. The value is linear in the moment oracle, so a certificate certifies moments
+once (`tableFn_eq`) and the kernel then evaluates only coefficients and placements.
+
+**Worked entries (Table 3).**
+
+| entry | value | new moments per piece |
+|---|---|---|
+| `J_T[P₂, P₂]` (cross-check, `genEntryPP_eq_v2h`) | 2.27107 × 10⁻⁵⁸ | 0 (V2h's table) |
+| `J_T[P₄, 1]` | 2.75169 × 10⁻⁵⁹ | 0 (V2h's table) |
+| `J_T[P_{(2,2)}, 1]` | 2.28799 × 10⁻⁵⁸ | 0 (V2h's table) |
+| `J_T[L − P₁, 1]` | 5.52809 × 10⁻⁵⁷ | 2: `(0, 0, 2, 1)`, `(0, 0, 3, 0)` |
+
+Exact identity: `J[P_{(2,2)}, 1] − J[P₂, P₂] = (1/5 − 1/9) · 45 ∫_{T̂} U⁶` (`∫₀^U P_{(2,2)}` and
+`(∫₀^U P₂)²` differ only in the `U⁵`/`U⁶` coefficient).
+
+**Independent checks (exploratory).** The exact model (`gen_entry_v2i_model.py`) reproduces
+V2f–V2h's synthetic values exactly; synthetic `N = 3` grids agree within the usual sub-percent grid
+oscillation for the four entries and for three uncertified ones (three factors, `a = 1, 2`);
+Monte Carlo at `N = 44` gives z = 0.52, 0.38, 1.06.
+
+**Costs (measured).**
+- Kernel cost per moment grows roughly linearly in `m + n`: 3.7 s `(2, 0)`; 6–7 s `(2, 1)`, `(3, 0)`;
+  9–11 s `(2, 2)`, `(3, 1)`; 12–13 s `(4, 1)`, `(5, 0)`. Profiling places it in large-rational
+  arithmetic in `innerVal`; binomials and powers are minor.
+- With a moment table, the coefficient side costs 14 ms (`L − P₁`), 51 ms (`P₄`), 350 ms
+  (`P_{(2,2)}`) and 6.3 s (the three-factor `J[P_{(2,2)}, P₂]`) per piece.
+- Without a table the kernel re-evaluates cells at every placement leaf (`J[P_{(2,2)}, 1]` at
+  `N = 3` exhausted memory), so tables are essential.
+- Build: 1 543 s (26 min), peak 3.89 GB: per nonempty piece about 12 s for the two new moments
+  and under 1 s for the four table-driven piece values.
+
+## 11. After V2i
+
+1. **Moment tables by `(m, n)`.** An entry needs the keys `(A, B, m, n)` its `genPiece` queries
+   (`gen_entry_v2i_model.keys`). Certifying a table for one `(m, n)` serves every entry that uses
+   it. Example: `J_T[P_{(2,2)}, P₂]` needs 44 keys per piece, of which V2h holds 21; the rest
+   (`A + B ≤ 6` at `m = 2`, `A + B ≤ 4` at `m = 4`, …, `m = 8`) cost about 4–5 kernel-minutes per
+   piece at the current evaluator.
+2. **A faster evaluator before large tables.** Within a piece, the five `boxTri` cells are shared
+   by every moment, and many moments call `boxVal` at the same exponent pair. Certifying `boxVal`
+   values once per (cell, exponent pair) and assembling moments from numerals is estimated
+   (V2h's 15-moment table: about 615 `boxVal` calls against about 140 distinct ones) to cut the
+   moment cost by 4–5×.
+3. **`J_T(P⋆) − 4 I_T(P⋆)`.** For `P⋆ = Σ cᵢ Gᵢ`, `J_T(P⋆) = Σ_{i,j} cᵢ cⱼ J_T[Gᵢ, Gⱼ]` is, piece by
+   piece, one coefficient vector over the moment keys (`placeVal` is linear in the oracle). The
+   full key set of `B₂₁` is large (§7: up to about 1.6 × 10⁵ per piece), so the per-cell collapse of
+   §7 (one bivariate polynomial per cell, about 5 175 `boxVal` per piece) remains the route for
+   `P⋆`; V2i supplies the exact coefficient computation that feeds it, and `I_T(P⋆)` is V2c's.

@@ -316,6 +316,24 @@ objects in `BGP212/PowerSumSquare.lean` and `BGP212/PowerSumPlace.lean`): **the 
   table of 1 995 kernel-evaluated moments plus 1 064 further piece lemmas):
   `J_T[P₂, P₂] = J_T(P₂) ≈ 2.27107 × 10⁻⁵⁸` at Table 3, an explicit rational.
 
+The twenty-first pair is V2i (`Challenge/GenEntry.lean`, `Solution/GenEntry.lean`,
+`Solution/GenEntryTable.lean`, the certificate `Solution/GenEntryCert0.lean` … `Cert13.lean` and
+`Solution/GenEntryCertSum.lean`, objects in `BGP212/GenEntry.lean` and `BGP212/GenEntryBlock.lean`):
+**general polynomial marginal Gram entries `J_T[G_{a,λ}, G_{b,μ}]`, `G_{a,λ} = (L − P₁)^a P_λ`**.
+
+- `inner_genFun`: `∫₀^U G_{a,λ}` as a sum over sub-multisets `T ⊆ λ` and powers of `L − Ŝ`, so every
+  entry is a combination of power-sum products against `U^m (L − S)^n`; `piece_mono_n` makes every
+  monomial weight against that block a moment `pieceMn`.
+- `piece_state`, `piece_place`: products of power sums on a piece, by an induction over the
+  factors (each merges into an open coordinate or opens one of class `c`, `n_c − #open` times);
+  unrolled this is the set-partition placement with falling-factorial class counts.
+- `genEntry_eq`: `J_T[G_{a₁,λ₁}, G_{a₂,λ₂}] = genEntryVal N g L τ C a₁ λ₁ a₂ λ₂` for every `N ≥ 1`
+  and data with `0 ≤ g ≤ C(1)`, `C(N) < N g`; `jT_gen_table3`: every `B₂₁` entry at Table 3 is the
+  rational `genEntryVal 44 …`.
+- Evaluated by the kernel (moment tables shared with V2h through `tableFn_eq`): `J_T[P₄, 1]`,
+  `J_T[P_{(2,2)}, 1]`, `J_T[L − P₁, 1]`, and `J_T[P₂, P₂]` recomputed through the general form
+  (`genEntryPP_eq_v2h`).
+
 ## What is proved, imported, and external
 
 - **Proved here, kernel-checked:** Lemma 12.1; the Table 3 parameter layer and every
@@ -331,7 +349,8 @@ objects in `BGP212/PowerSumSquare.lean` and `BGP212/PowerSumPlace.lean`): **the 
   exact polygon-cell integrals of the cap branch and one Table 3 cap-branch certificate (V2e-B);
   all three endpoint branches and the marginal Gram entry `J_T[1, 1]` at Table 3 (V2f); the bilinear
   `J_T` form, single-coordinate placement, and the power-sum entry `J_T[P₂, 1]` at Table 3 (V2g);
-  two-coordinate placement and the entry `J_T[P₂, P₂]` at Table 3 (V2h).
+  two-coordinate placement and the entry `J_T[P₂, P₂]` at Table 3 (V2h); every `J_T` entry of
+  `B₂₁` generators in closed form, with four Table 3 entries evaluated (V2i).
 - **Imported analytic hypotheses (taken as hypotheses in Axiom's certificate too):** the
   Type I/II/III equidistribution estimates (Lemmas 5.3–5.7), bilinear Bombieri–Vinogradov
   (Lemma 8.1), and the Harman decomposition (Proposition 7.2). In A4 these are the named
@@ -469,6 +488,15 @@ mkdir -p /tmp/v2h_cert && python3 -I specs/checks/power_sq_entry_v2h_emit.py /tm
 for f in /tmp/v2h_cert/*.lean; do cmp "$f" "Solution/$(basename "$f")"; done
 python3 -I specs/checks/power_sq_entry_v2h_controls.py /tmp/v2h_ctl
 for f in /tmp/v2h_ctl/*.lean; do lake env lean "$f" >/dev/null 2>&1 && echo "$f accepted" || echo "$f rejected"; done
+```
+
+For V2i's certificate and controls:
+
+```text
+mkdir -p /tmp/v2i_cert && python3 -I specs/checks/gen_entry_v2i_emit.py /tmp/v2i_cert
+for f in /tmp/v2i_cert/*.lean; do cmp "$f" "Solution/$(basename "$f")"; done
+python3 -I specs/checks/gen_entry_v2i_controls.py /tmp/v2i_ctl
+for f in /tmp/v2i_ctl/*.lean; do lake env lean "$f" >/dev/null 2>&1 && echo "$f accepted" || echo "$f rejected"; done
 ```
 
 `./verify.sh` builds the project and runs Lean Comparator on each config in `Comparator/`.
