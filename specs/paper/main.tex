@@ -21,25 +21,25 @@
 \newcommand{\code}[1]{\texttt{#1}}
 \title{Exact Rational Integration over Constrained Simplices\\[4pt]\large Symmetric Polynomial Bases, Marginal Geometry, and Lean 4 Verification}
 \author{Reading Point \texorpdfstring{(\href{https://translatepi.ai/}{translatepi.ai})}{(translatepi.ai)}}
-\date{Draft v0.6 --- 20 October 2026}
+\date{Draft v0.7 --- 22 October 2026}
 \begin{document}
 \maketitle
 \begin{abstract}
-We present a formalized collection of integration identities for polynomial weights on
+We present formally verified integration identities for polynomial weights on
 simplexes constrained by coordinate thresholds and cardinality-dependent caps.
-The development includes exact simplex moments, a rational polynomial subspace of
- dimension 846, cap-parametric formulas for monomial integrals, rational Gram-entry
- representations, fibre decompositions, and two-aggregate Dirichlet integration.
-  Exact polygon-cell formulas cover all marginal endpoint branches. Kernel-checked
-  rational certificates establish the constant entry $J_T[1,1]$, the cross-entry
-  $J_T[P_2,1]$, and the power-sum-square entry $J_T[P_2,P_2]$ under Table~3
-  parameters. The V2h proof uses two distinguished-coordinate placements and
-  a reusable rational moment table, completing a $2\times2$ marginal Gram block
-  on $\operatorname{span}\{1,P_2\}$. The V2h Comparator's 27 statements were
-  accepted by the Lean kernel on the VPS. The previously recorded V2g regression
-  accepted 19 of 19 suites; no retained aggregate log certifies the full V2h
-  regression count. These independent integration results contribute exact
-  foundations for subsequent variational positivity work.
+The development establishes exact simplex moments, a rational polynomial
+subspace of dimension 846, general monomial and ordinary Gram-entry formulas,
+fibre decompositions, two-aggregate Dirichlet integration, and exact
+polygon-cell integrals covering all marginal endpoint branches.
+Kernel-checked rational certificates first establish the marginal entries
+$J_T[1,1]$, $J_T[P_2,1]$, and $J_T[P_2,P_2]$, completing a
+$2\times 2$ block. The V2i development then proves a general exact rational
+representation for every pair of polynomial generators, with further
+Table~3 certificates and an exact bridge back to the V2h entry.
+Its 33-statement Comparator suite was accepted by the Lean default kernel
+on the VPS. The full regression produced 21 of 21 acceptances and exited
+with status zero. This establishes general representations, not an evaluated
+$846\times846$ numerical matrix or the final variational inequality.
 \end{abstract}
 
 \section{Introduction and scope}
@@ -289,7 +289,7 @@ fibre endpoint as
 The cap index belongs to the stratum $R$. Substituting the translated point's
 rough set $R\cup K$ instead changes the endpoint; the Table~3 control records
 the distinct values $587/1250$ and $461/1250$.
-The cap-branch polygon-cell integration is established in Section~\ref{sec:capcell}; all endpoint branches and the constant marginal Gram entry are treated in Section~\ref{sec:v2f}; the power-sum entry follows in Section~\ref{sec:v2g}, and the power-sum-square entry in Section~\ref{sec:v2h}.
+The cap-branch polygon-cell integration is established in Section~\ref{sec:capcell}; all endpoint branches and the constant marginal Gram entry are treated in Section~\ref{sec:v2f}; the power-sum entry follows in Section~\ref{sec:v2g}, and the power-sum-square entry in Section~\ref{sec:v2h}, and general generator entries in Section~\ref{sec:v2i}.
 
 
 \section{Polygon-cell integration and the cap branch}\label{sec:capcell}
@@ -594,6 +594,88 @@ certificate for a strictly positive $2\times2$ determinant is not
 asserted here. Independent Monte Carlo and low-dimensional grid
 comparisons test the computed value but are distinct from the Lean proof.
 
+\section{General polynomial marginal Gram entries (V2i)}\label{sec:v2i}
+The preceding certificates evaluate a small marginal Gram block. V2i extends
+the exact representation to arbitrary pairs of the generators
+$G_{a,\lambda}=(L-P_1)^a P_{\lambda}$, where $P_{\lambda}$ is a product of
+power sums. If $M=L-\sum_i\widehat x_i$ and the fibre endpoint is $U$, then
+\begin{equation}\label{eq:general-inner}
+\int_0^U G_{a,\lambda}(\widehat x,u)\,du
+=\sum_{T\subseteq\lambda}\widehat P_{\lambda\setminus T}
+  \sum_{j=0}^{a}\binom aj(-1)^j
+  \frac{M^{a-j}U^{s_T+j+1}}{s_T+j+1},
+\qquad s_T=\sum_{q\in T}q.
+\end{equation}
+Here the subset sum counts selections of indexed factors (including repeated
+parts with their multiplicities). The formula is proved as
+\code{inner\_genFun} in \nolinkurl{Solution/GenEntry.lean}.
+
+\paragraph{Translated placements and common moments.}
+On each stratum, a factor of $\widehat P_q$ is a sum of powers of translated
+coordinates. The recursive placement calculation either attaches a new
+factor to an already distinguished coordinate or opens a coordinate in one
+of the three classes (rough, intermediate, or remaining). The latter has
+multiplicity equal to the class population minus the number of already
+selected coordinates in that class. Unrolling the recursion accounts for
+set partitions and falling-factorial multiplicities. The resulting
+monomial weights reduce to a factorial factor times a moment indexed by
+the total rough-group and smooth-group degrees. The principal corresponding
+Lean declarations include \code{piece\_place}, \code{piece\_state}, and
+\code{piece\_mono\_n}.
+
+\begin{theorem}[General marginal Gram representation]\label{thm:genentry}
+For every $N\ge1$, parameters satisfying the admissibility assumptions
+$0\le g\le C(1)$ and $C(N)<Ng$, and arbitrary generator indices
+$(a_1,\lambda_1)$ and $(a_2,\lambda_2)$, the bilinear marginal form is an
+explicit finite expression:
+\[
+ J_T[G_{a_1,\lambda_1},G_{a_2,\lambda_2}]
+ =\operatorname{genEntryVal}(N,g,L,\tau,C,
+                 a_1,\lambda_1,a_2,\lambda_2).
+\]
+For the rational Table~3 parameters, the expression is rational; every
+pair of generators indexed by $B_{21}$ therefore has an exact rational
+representation.
+\end{theorem}
+\noindent\textbf{Lean:} \code{genEntry\_eq}, \code{jT\_gen\_table3};
+\nolinkurl{Solution/GenEntry.lean}, \nolinkurl{Solution/GenEntryTable.lean}.
+The latter theorem supplies a rational representation for all entries; it
+does not assert that every entry of the numerical matrix has been evaluated.
+
+\begin{proposition}[Selected Table~3 marginal certificates]\label{prop:genentrycert}
+Under the specified Table~3 parameters the exact kernel-checked rational
+values have the following approximations:
+\[
+\begin{aligned}
+ J_T[P_2,P_2]        &\approx 2.27107\times10^{-58},\\
+ J_T[P_4,1]          &\approx 2.75169\times10^{-59},\\
+ J_T[P_{(2,2)},1]    &\approx 2.28799\times10^{-58},\\
+ J_T[L-P_1,1]        &\approx 5.52809\times10^{-57}.
+\end{aligned}
+\]
+The first value is recovered exactly from the independently checked V2h
+certificate by \code{genEntryPP\_eq\_v2h}; the other displayed values
+are further applications of the general formula.
+\end{proposition}
+\noindent\textbf{Lean:} \code{jT\_P2\_P2\_gen\_table3},
+\code{jT\_P4\_one\_table3}, \code{jT\_P22\_one\_table3},
+\code{jT\_LP1\_one\_table3}.
+The supporting rational moment certificates are compiled in
+\nolinkurl{Solution/GenEntryCert0.lean} through
+\nolinkurl{Solution/GenEntryCert13.lean} and
+\nolinkurl{Solution/GenEntryCertSum.lean}. The generator and controls
+are in \nolinkurl{specs/checks/gen_entry_v2i_emit.py} and related
+\nolinkurl{specs/checks/gen_entry_v2i_*.py} files.
+
+\paragraph{Computational scope.}
+The V2i formula covers every pair of generators, whereas compiling an
+entire numerical Gram matrix would require many further exact evaluations.
+The optimized polynomial $P^\star$, the exact sign of
+$J_T(P^\star)-4I_T(P^\star)$, and the remaining variational conditions
+are not established here. The proposed next step is to collect coefficients
+for repeated rational moments across generator pairs before evaluating
+those moments, preserving an exact equality with the V2i formula.
+
 \section{Verification, limitations, and further mathematics}
 The project uses Lean \code{v4.34.0-rc2} and a pinned Mathlib revision
 \code{85e3a25}. At the V2g baseline, all 19 Comparator suites were independently
@@ -629,14 +711,26 @@ with VPS provenance commit
 The recorded V2h proof includes 14 rational moment-certificate rows and
 an assembly theorem. The final Comparator acceptance is confirmed; a
 complete 20/20 regression count has not been established from a saved log.
+For V2i, the 33-statement Comparator suite was accepted by the Lean default
+kernel on the VPS. The complete regression log records \textbf{21/21}
+``Your solution is okay!'' messages and the verification script's
+\textbf{exit status 0}. The proof snapshot is
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/a994d73}{\code{a994d73}};
+its separately published VPS provenance commit is
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/486cf85}{\code{486cf85}}.
+The V2i record and Comparator configuration are
+\nolinkurl{specs/results/V2i_gen_entry.yaml} and
+\nolinkurl{Comparator/gen_entry_v2i.json}. Prior control results and
+exploratory numerical comparisons are distinct from the saved VPS kernel
+acceptances.
 The reported kernel axioms for these developments are
 \code{propext}, \code{Quot.sound}, and \code{Classical.choice}.
 Results and verification scripts are available in
 \href{https://github.com/thinkthoughts/lean-bgp212/tree/main/specs/results}{\code{specs/results}}.
 
-Further work extends the three certified entries to general
-power-sum marginal Gram entries and their exact rational evaluation,
-optimized polynomial coefficients, exact variational positivity certificates, and
+Further work evaluates additional entries using the general V2i representation,
+combines shared rational moments efficiently, and addresses optimized polynomial
+coefficients, exact variational positivity certificates, and
 remaining analytic hypotheses. The existing Lean development formalizes the
 \emph{conditional} implication $\mathrm{DHL}[45,2]\Rightarrow H_1\le212$;
 this manuscript does not claim an unconditional formal proof of $H_1\le212$.
