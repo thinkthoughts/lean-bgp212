@@ -22,3 +22,4 @@ import Challenge.GenEntry
 import Challenge.MomentAgg
 import Challenge.SymReduce
 import Challenge.SymStaged
+import Challenge.SymTrie

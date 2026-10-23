@@ -1,0 +1,84 @@
+# Result record: twenty-fifth Challenge/Solution pair (V2m, certified prefix-trie evaluation for B₂₁)
+
+identity:
+  id: V2m
+  statement: "A certified prefix trie of factor multisets (TrieOK: every node (Q, L) carries a chain certificate from the empty state for the factors P̂_q, q ∈ Q, each node added from a parent in the trie by one certified step) evaluates V2i's placement value for every reordering of a node's degrees and every moment oracle: TrieOK n g T → (Q, L) ∈ T → Q'.Perm Q → placeVal M n 0 Fin.elim0 Fin.elim0 (psFactors g Q') = symFinal M L (trieOK_placeVal). Moment profiles of leaves are certified from their stored parents (profCert_of_step, profCert_of_step_chunks), are invariant under reordering (profCert_perm), and certified profile lists give Gram-entry coefficient tables (trieProf_table_eq, through V2ℓ's profTable_eq)."
+  source: "Source/bgp212.pdf: Table 3 (p. 39), §9.4, the display of J_T (p. 41), §11 (B₂₁, p. 42)"
+  builds_on: "V2ℓ (StepCert, ChainCert, chainCert_snoc, chainCert_append, chainCert_placeVal, placeVal_perm, abProfile, ProfCert, profCert_of_chain, profCert_of_chunks, profTable, profTable_eq, stepCert_runs, decComb/decTable/decProf, genPieceP222_6_3_staged_expansion); V2k (symStep, normalize, symFinal); V2i (placeVal, genPieceWith, subsetTerms); A0–V2ℓ unchanged"
+  base_commits: "V2ℓ 5e8feaa on the V2j branch; the same Lean and Comparator content as V2ℓ a02c40e on main. V2ℓ's independent verification is reported separately and is not assumed here"
+
+state:
+  mathematical: proved
+  computational: kernel-verified demonstration (77 of the 2 360 trie nodes of one piece)
+  provenance: pinned
+  publication: draft
+
+scope:
+  proved: >
+    trieOK_nil, trieOK_root, trieOK_cons, trieOK_cons_chain, trieOK_placeVal (certified tries and
+    their evaluation for every reordering and every moment oracle); profOK_nil, profOK_cons,
+    profCert_perm, profCert_of_trie, profCert_of_step, profCert_of_step_chunks, trieProf_table_eq
+    (certified profile lists and the tables they give); table_parts_merge, trieProf_table_parts
+    (tables certified in parts and merged, in a tree).
+  kernel_certified: >
+    Table 3, piece (6, 3) (clsCount 44 6 3 = (6, 3, 35), shift g = 41/625): 77 trie nodes besides the
+    root — 22 stored nodes (canonical states certified by StepCert from the parent, chunked with a
+    linear merge when a step generates more than 900 entries) and 55 profile-only leaves — assembled
+    in Tt_trie_ok : TrieOK and Tt_prof_ok : ProfOK (78 profiles with the root). Coverage: every
+    multiset of blockMultisets 6 (22, up to 6 factors, degree 12) and of shortMultisets 2 (66, up to
+    degree 40) has a certified profile (Tt_covers); both sets are sorted and prefix-closed
+    (block6_shape, short2_shape); 139 partitions and 139 kept-part lists in B₂₁ (b21_counts).
+    Tables: V2ℓ's degree-12 statement reproduced (genPieceP222_6_3_trie_same, := rfl); the 49-pair
+    block |λ| ≤ 6 with weights cᵢcⱼ (231 keys, 4 parts); Σ_{i,j ≤ 10} J_T[P_2i, P_2j] (100 pairs, 901 keys,
+    23 parts merged 23 → 6 → 2 → 1);
+    J_T[P_20, P_20] piece (6, 3) (degree 40, 523 keys).
+  exploratory: >
+    specs/checks/sym_staged_v2l_counts.py and sym_trie_v2m_demo.py (Python, not theorems): 846
+    generators, 17 381 ordered factor lists, 2 361 multisets, a 2 360-step trie per piece, longest 20
+    factors; at piece (6, 3) the 150 three-factor nodes generate 1 309 843 entries (up to 9 878
+    states), the block |λ| ≤ 8 447 116. The kernel count of all 2 361 multisets (b21Multisets) exceeds
+    8 GB and is not part of the certified results.
+  representation_note: "Tables are coefficient representations tableVal T Mo = Σ c · Mo s; V2m evaluates no rational moment pieceMn"
+  unproved_assumptions: "none (axioms: propext, Quot.sound, Classical.choice)"
+  outside_V2m: >
+    The remaining 2 283 nodes of piece (6, 3) and the other pieces' tries, the moment values, the
+    846 × 846 matrices, P⋆ and J_T(P⋆) − 4 I_T(P⋆) (Exploratory/V2m/SPEC.md §7).
+
+verification:
+  definitions: BGP212/SymTrie.lean
+  challenge: Challenge/SymTrie.lean
+  solution: [Solution/SymTrie.lean, Solution/SymTrieProfData.lean, Solution/SymTrieProfData0.lean, Solution/SymTrieProfData1.lean, Solution/SymTrieProfData2.lean, Solution/SymTrieProfData3.lean, Solution/SymTrieProfData4.lean, Solution/SymTrieCert/, Solution/SymTrieNodes.lean, Solution/SymTrieKept.lean, "Solution/SymTrieTab*.lean (39 modules)", Solution/SymTrieDemo1.lean, Solution/SymTrieDemo2.lean, Solution/SymTrieDemo3.lean, Solution/SymTrieDemo4.lean, Solution/SymTrieDemo5.lean, Solution/SymTrieDemo6.lean, Solution/SymTrieSuite.lean]
+  comparator_config: Comparator/sym_trie_v2m.json
+  comparator_result: "20 statements accepted by the Lean default kernel, 745 s, peak 3.36 GB"
+  generators: [specs/checks/sym_trie_v2m_demo.py, specs/checks/sym_trie_v2m_controls.py, specs/checks/sym_trie_v2m_build.sh]
+  specification: Exploratory/V2m/SPEC.md
+  measurements:
+    progress: "77 trie nodes certified at piece (6, 3) besides the root (22 stored, 55 profile-only leaves); longest certified multiset 6 factors (degree 12); highest degree 40 ([20, 20]); 78 distinct certified moment profiles; 79 553 generated entries checked; 4 coefficient tables (231, 231, 901, 523 keys)"
+    sequential_build: "265 modules built one lean process at a time (specs/checks/sym_trie_v2m_build.sh order), 1 691 s in total; every module under 4 GB peak (largest 3.92 GB, a part of the one-part table; 1.34 GB anonymous)"
+    by_kind: "certificate modules in Solution/SymTrieCert/ (208): 1 205 s, 2.93–3.91 GB peak, at most 1.21 GB anonymous; profile data (6): 3.5–13.5 s, at most 3.38 GB; table parts (29): 4.8–11.0 s, 3.11–3.92 GB; table merges (10): 5.5–12.4 s, 3.16–3.79 GB; kept-part lists 9.0 s, 3.90 GB; assembly, demonstrations, suite and challenge (9): 3.8–12.6 s, at most 3.49 GB"
+    memory_note: "peak = maximum resident set of the build (lake + lean), dominated by about 3.0–3.4 GB of memory-mapped Mathlib and project .olean files shared between processes; anon = peak anonymous (heap) memory of the process tree"
+    engineering_notes: "single-module tables first exceeded the limit (one-part table out of memory at 8 GB, block table 4.03 GB, all profile data in one module 4.31 GB, the 523-entry degree-40 literal over the default maxRecDepth); certifying b21Kept once (b21Kept_eq), data modules separate from table checks, tables in parts sized by the profiles they look up, and 4-way merges in a tree (table_parts_merge) brought every module under 4 GB"
+    single_evaluation_baselines: "the kernel count of all 2 361 multisets (b21Multisets.length) exceeds 8 GB; Σ_{i,j ≤ 10} J_T[P_2i, P_2j] in one profTable check exceeds 8 GB (out of memory at 133 s)"
+  axioms_used: [propext, Quot.sound, Classical.choice]
+  trusted_base: "Lean 4 kernel + core + Mathlib (Track B, pinned 85e3a25)"
+  controls:
+    - change: "trieOK_placeVal stated with 2 * symFinal M L on the right in the Challenge, checked with a configuration naming only trieOK_placeVal"
+      result: "rejected: 'Challenge and solution theorem statement do not match: BGP212.Challenge.trieOK_placeVal'"
+    - change: "kernel controls (specs/checks/sym_trie_v2m_controls.py): the profile of [2, 2] claimed for the step by P̂₄ from [2]; the profile of the leaf [20, 20] with one coefficient changed; the multiset [8, 2, 2, 2] (block |λ| ≤ 8) claimed to have a certified profile; {[], [4, 2]} claimed prefix-closed; the table of J_T[P_20, P_20] on piece (6, 3) with one power of U changed"
+      result: "all five rejected by decide +kernel; the positive controls (the profile of [4, 2] reused for [2, 4] by profCert_perm; the correct step by P̂₂ from [2]; [6, 4, 2] covered and {[], [4], [4, 2]} a trie) accepted"
+    - change: "agreement with earlier certificates and the Python mirror"
+      result: "genPieceP222_6_3_trie_same (V2ℓ's genPieceP222_6_3_staged_expansion, := rfl); the mirror agrees with V2k's genTable on the 231- and 523-key tables and on the sum of the 49 block tables"
+
+result:
+  toolchain: leanprover/lean4:v4.34.0-rc2
+  mathlib: 85e3a25
+  run_date: 2026-10-22
+  commit_hash: PENDING_VPS
+
+next_development:
+  three_factor_layer: "the 150 three-factor nodes and the block |λ| ≤ 8 of piece (6, 3), about 1 500 certificate modules at the measured rate"
+  direct_profiles: "profiles computed from a parent without canonicalizing the last step"
+  other_pieces: "the same subtree for the other Table 3 pieces"
+  moments: "V2j §6 boxVal collapse; then I_T(P⋆) from V2c"
+
+footer: Admissible generalizations trail leading specifications.
