@@ -73,7 +73,7 @@ result:
   toolchain: leanprover/lean4:v4.34.0-rc2
   mathlib: 85e3a25
   run_date: 2026-10-22
-  commit_hash: PENDING_VPS
+  commit_hash: 73b5359
 
 next_development:
   three_factor_layer: "the 150 three-factor nodes and the block |λ| ≤ 8 of piece (6, 3), about 1 500 certificate modules at the measured rate"
@@ -82,3 +82,21 @@ next_development:
   moments: "V2j §6 boxVal collapse; then I_T(P⋆) from V2c"
 
 footer: Admissible generalizations trail leading specifications.
+
+independent_verification:
+  source_commit: 73b5359
+  merge_commit: 283b634
+  macos:
+    core_theorem_build: accepted
+    sequential_certificate_build: accepted
+    comparator: "not independently confirmed"
+  linux_vps:
+    sequential_certificate_build: accepted
+    comparator: accepted
+    comparator_statements: 20
+    default_kernel: accepted
+    sandbox: "real Linux landrun"
+  conclusion: >
+    V2m's certified prefix-trie modules compiled independently
+    on macOS and Linux. The 20-statement Comparator suite
+    was accepted by the Lean default kernel on the Linux VPS.
