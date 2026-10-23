@@ -2,8 +2,8 @@
 
 **Working paper:** *Exact Rational Integration over Constrained Simplices*
 **Project:** [translatepi.ai](https://translatepi.ai/) · [Lean repository](https://github.com/thinkthoughts/lean-bgp212)
-**Baseline:** V2i, [proof commit `a994d73`](https://github.com/thinkthoughts/lean-bgp212/commit/a994d73); [VPS verification/provenance commit `486cf85`](https://github.com/thinkthoughts/lean-bgp212/commit/486cf85).
-**Verification:** V2i completed the full **21/21 VPS Comparator regression**, including its **33-statement** Challenge/Solution suite. The final suite reported `Lean default kernel accepts the solution` and `Your solution is okay!`; `verify.sh` finished with **exit status 0**. The VPS run was logged to `/tmp/bgp212-v2i-full.log`. Earlier V2g and V2h verification results remain documented below. V2i uses separately compiled exact moment-table certificates and extends V2h’s certified entries.
+**Baseline:** V2j, [implementation commit `a9a8af9`](https://github.com/thinkthoughts/lean-bgp212/commit/a9a8af9), building on V2i [proof commit `a994d73`](https://github.com/thinkthoughts/lean-bgp212/commit/a994d73) and [VPS verification/provenance commit `486cf85`](https://github.com/thinkthoughts/lean-bgp212/commit/486cf85).
+**Verification:** V2i completed the full **21/21 VPS Comparator regression**, including its **33-statement** Challenge/Solution suite. The final suite reported `Lean default kernel accepts the solution` and `Your solution is okay!`; `verify.sh` finished with **exit status 0**. The VPS run was logged to `/tmp/bgp212-v2i-full.log`. V2j additionally compiled on the MacBook Pro and its 24-statement Comparator configuration was accepted on both the MacBook Pro and Linux VPS. The Mac used a development substitute for Linux `landrun`, whereas the VPS used its native Linux verification setup. Earlier verification results remain documented below.
 **Purpose:** Inventory the central mathematical statements for the paper, with source locations and explicit scope. These are independent formalization results motivated by the bounded-prime-gap argument; the unconditional bound is not claimed here.
 
 ## 1. Exact simplex moments
@@ -367,6 +367,24 @@ The general closed form reproduces V2h's separately certified $J_T[P_2,P_2]$ exa
 
 **Verification and computational scope:** The full **33-statement V2i Comparator suite** was accepted by the Lean default kernel on the VPS. The entire `verify.sh` regression recorded **21/21** `Your solution is okay!` acceptances and **exit status 0**; the final V2i suite explicitly reported `Lean default kernel accepts the solution`. The independently verified proof is pinned at commit [`a994d73`](https://github.com/thinkthoughts/lean-bgp212/commit/a994d73), with verification provenance at [`486cf85`](https://github.com/thinkthoughts/lean-bgp212/commit/486cf85). In the development container, the V2i suite took 13,997 s (including replay of V2h moments); the statement-level negative control (`genEntry_eq` with a doubled right side) was rejected, and four positive and four negative Lean controls yielded their expected outcomes. Monte Carlo checks at $N=44$ used $z=0.52$, $0.38$, and $1.06$; these checks are exploratory, not kernel proofs. The development-container certificate build took 1,543 s (peak 3.89 GB). V2i proves the exact representation of every $B_{21}$ entry; evaluating further entries requires their moment tables. The full $846\times846$ numerical matrices, $P^\star$, and the variational certificate remain targets.
 
+## 13. Shared-moment aggregation of Gram entries (V2j)
+
+**Lean:** `Solution/MomentAgg.lean`, `Solution/MomentAggDemo1.lean` through `Solution/MomentAggDemo4.lean`, `Solution/MomentAggSuite.lean`  
+**Definitions:** `BGP212/MomentAgg.lean`  
+**Challenge and Comparator:** `Challenge/MomentAgg.lean`, `Comparator/moment_agg_v2j.json`  
+**Specification and exploratory checks:** `Exploratory/V2j/SPEC.md`, `specs/checks/moment_agg_v2j_demo.py`  
+**Result record:** `specs/results/V2j_moment_agg.yaml`
+
+**Shared-moment evaluation.** V2j adds an exact evaluation layer to V2i's general rational marginal Gram-entry representation. Rather than treating each occurrence of a moment independently, it identifies the finite moment keys used by the selected piece and aggregates their rational coefficients. The construction retains V2i's underlying definitions and mathematical scope.
+
+**Formal correctness.** The Lean development proves linearity of `genPieceWith` in its moment oracle, locality with respect to the relevant moment-key set (`genPieceWith_congr`), and agreement between the aggregated coefficient representation and the original weighted Gram-entry expression. In particular, `aggEntryVal_eq` and `jT_weighted_eq_agg` identify the shared-moment calculation with the V2i formulation. These are exact identities, not numerical approximations.
+
+**Exact demonstrations.** Four staged Lean demonstration modules and `MomentAggSuite` build successfully. The exploratory generator records fewer distinct moment keys than the number of repeated calls: for example, the $J_T[P_2,P_2]$ example uses 19 distinct keys across 115 occurrences, while a $J_T[P_{(2,2)},P_{(2,2)}]$ example records 85 distinct keys across 20,542 occurrences. These counts illustrate computational reuse; they do not constitute a claimed bound for every Gram entry.
+
+**Verification.** V2j implementation commit [`a9a8af9`](https://github.com/thinkthoughts/lean-bgp212/commit/a9a8af9) was merged into `main`. On the MacBook Pro, the definitions, central proofs, four demonstration modules, and combined suite compiled successfully. The **24-statement V2j Comparator** independently returned `Your solution is okay!` on both the MacBook Pro and Linux VPS. On macOS, Comparator used `fake-landrun.sh` without Linux sandbox isolation; the VPS supplied the Linux verification environment. The matching Lean 4.34.0-rc2 `lean4export` was built separately from Comparator's Lean 4.35.0 toolchain.
+
+**Scope.** V2j proves correctness of moment reuse and coefficient aggregation for the specified representation. It does not yet evaluate the full $846\times846$ marginal Gram matrix, determine the optimized polynomial $P^\star$, establish the final variational positivity certificate, or yield an unconditional proof of $H_1\le212$.
+
 ## Formal verification and provenance
 
 - **Source:** [`thinkthoughts/lean-bgp212`](https://github.com/thinkthoughts/lean-bgp212)
@@ -377,6 +395,7 @@ The general closed form reproduces V2h's separately certified $J_T[P_2,P_2]$ exa
 - **V2g:** [proof commit `ad70abb`](https://github.com/thinkthoughts/lean-bgp212/commit/ad70abb); [VPS provenance commit `12f8b16`](https://github.com/thinkthoughts/lean-bgp212/commit/12f8b16).
 - **V2h:** [proof commit `6cef1f4`](https://github.com/thinkthoughts/lean-bgp212/commit/6cef1f4); [VPS provenance commit `a9b0e0c`](https://github.com/thinkthoughts/lean-bgp212/commit/a9b0e0c).
 - **V2i:** [proof commit `a994d73`](https://github.com/thinkthoughts/lean-bgp212/commit/a994d73); [VPS provenance commit `486cf85`](https://github.com/thinkthoughts/lean-bgp212/commit/486cf85).
+- **V2j:** [implementation commit `a9a8af9`](https://github.com/thinkthoughts/lean-bgp212/commit/a9a8af9); 24-statement Comparator configuration accepted on MacBook Pro and Linux VPS.
 - **Toolchain:** Lean `v4.34.0-rc2`; mathlib pinned at `85e3a25` (see repository result YAML files).
 - **VPS:** V2g regression: 19/19 Comparator suites accepted; V2h full 27-statement Comparator: default-kernel accepted; cumulative 20/20 count not saved. V2i full 33-statement Comparator: default-kernel accepted on VPS, with 21/21 cumulative acceptances and `verify.sh` exit status 0. V2d: four positive/four negative controls; V2e-A: five positive/four negative; V2e-B: five positive/five negative; V2f: four positive/five negative; V2g: two positive/four negative Lean-file controls. Additional V2f/V2g statement-mismatch tests were reported rejected in Claude’s development environment.
 - **Trusted axioms reported for V2d, V2e-A, V2e-B, V2f and V2g:** `propext`, `Quot.sound`, `Classical.choice`.
@@ -386,7 +405,7 @@ The general closed form reproduces V2h's separately certified $J_T[P_2,P_2]$ exa
 
 The following are **outstanding**, not conclusions of this inventory:
 
-1. Evaluating further `J_T` Gram entries: V2i proves the exact representation of every $B_{21}$ entry and evaluates four; the rest need their moment tables (and, at scale, a faster cell evaluator).
+1. Evaluating further `J_T` Gram entries: V2i proves the exact representation of every $B_{21}$ entry and evaluates four; V2j aggregates shared moment keys, but the remaining entries still need exact moment tables and scalable evaluation.
 2. Exact optimized polynomial coefficient data and direct positivity certificates.
 3. Remaining analytic/variational hypotheses needed for `DHL[45,2]`.
 
