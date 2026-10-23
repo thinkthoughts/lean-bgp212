@@ -21,3 +21,4 @@ import Challenge.PowerSumSquare
 import Challenge.GenEntry
 import Challenge.MomentAgg
 import Challenge.SymReduce
+import Challenge.SymStaged

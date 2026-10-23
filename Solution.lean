@@ -65,3 +65,12 @@ import Solution.SymReduceDemo1
 import Solution.SymReduceDemo2
 import Solution.SymReduceDemo3
 import Solution.SymReduceSuite
+import Solution.SymStaged
+import Solution.SymPerm
+import Solution.SymStagedDemo1
+import Solution.SymStagedDemo2
+import Solution.SymStagedDemo3
+import Solution.SymStagedDemo4
+import Solution.SymStagedDemo5
+import Solution.SymStagedDemo6
+import Solution.SymStagedSuite
