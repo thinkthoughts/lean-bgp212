@@ -60,3 +60,8 @@ import Solution.MomentAggDemo2
 import Solution.MomentAggDemo3
 import Solution.MomentAggDemo4
 import Solution.MomentAggSuite
+import Solution.SymReduce
+import Solution.SymReduceDemo1
+import Solution.SymReduceDemo2
+import Solution.SymReduceDemo3
+import Solution.SymReduceSuite

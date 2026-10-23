@@ -355,6 +355,27 @@ The twenty-second pair is V2j (`Challenge/MomentAgg.lean`, `Solution/MomentAgg.l
 - Demonstration: V2i's certified piece value `gpPP_6_3` recomputed from 19 moments (115 oracle
   queries), V2i's four entries on that piece from 21 shared keys, and `J_T[P₂, P₂]` on synthetic data.
 
+The twenty-third pair is V2k (`Challenge/SymReduce.lean`, `Solution/SymReduce.lean`, the demonstration
+`Solution/SymReduceDemo1.lean` … `Demo3.lean`, wrappers in `Solution/SymReduceSuite.lean`, objects in
+`BGP212/SymReduce.lean`, specification `Exploratory/V2k/SPEC.md`): **symmetric-function reduction of the
+placement recursion**.
+
+- `placeVal_eq_msVal`: V2i's placement recursion is the value of a product of augmented monomial
+  symmetric functions `∏_c m̃_{ν_c}`, a multiset of parts `(class, exponent)`, continued factor by
+  factor (`p_{c,a} · m̃_ν = Σ_j m̃_{ν + a e_j} + m̃_{ν ∪ (a)}`).
+- `symPlaceVal_eq`, `genPieceSym_eq`, `genEntrySym_eq`, `jT_eq_genEntrySym`: the canonical evaluator
+  (one integer partition per class, states sorted and merged after every factor, exact
+  coefficients) equals V2i's specification for every moment oracle, hence `J_T`.
+- `symPlaceVal_eq_trans`, `psTrans_indep`, `placeVal_psTrans`: the transition `p_α = Σ_ν R_{α,ν} m̃_ν`
+  (independent of the class sizes) and the Dirichlet-weighted moment
+  `∏_c (n_c)_{ℓ(ν_c)} ∏ νᵢ! · M(A, B)`.
+- `genPieceWith_eq_table`, `aggTable_eq`: every moment coefficient of a piece from one evaluation.
+- Demonstration: transition tables; small placements evaluated both ways; degrees 8 and 10, where
+  V2i's recursion takes 45 s and exhausts memory respectively (V2k: 5 s and 19 s); at Table 3,
+  piece `(6, 3)` of `J_T[P₂, P₂]` and of V2i's four entries reproduces V2i's and V2j's certified
+  statements (`rfl`), and the 85 coefficients of `J_T[P_{(2,2)}, P_{(2,2)}]` come from one 4.9 s
+  kernel evaluation.
+
 ## What is proved, imported, and external
 
 - **Proved here, kernel-checked:** Lemma 12.1; the Table 3 parameter layer and every
@@ -372,7 +393,9 @@ The twenty-second pair is V2j (`Challenge/MomentAgg.lean`, `Solution/MomentAgg.l
   `J_T` form, single-coordinate placement, and the power-sum entry `J_T[P₂, 1]` at Table 3 (V2g);
   two-coordinate placement and the entry `J_T[P₂, P₂]` at Table 3 (V2h); every `J_T` entry of
   `B₂₁` generators in closed form, with four Table 3 entries evaluated (V2i); shared-moment
-  aggregation of weighted sums of entries, proved equal to V2i's closed form (V2j).
+  aggregation of weighted sums of entries, proved equal to V2i's closed form (V2j); a
+  symmetric-function evaluator for every such entry, proved equal to V2i's placement recursion,
+  with the transition to monomial symmetric functions and the Dirichlet-weighted moment (V2k).
 - **Imported analytic hypotheses (taken as hypotheses in Axiom's certificate too):** the
   Type I/II/III equidistribution estimates (Lemmas 5.3–5.7), bilinear Bombieri–Vinogradov
   (Lemma 8.1), and the Harman decomposition (Proposition 7.2). In A4 these are the named
@@ -533,6 +556,16 @@ mkdir -p /tmp/v2i_cert && python3 -I specs/checks/gen_entry_v2i_emit.py /tmp/v2i
 for f in /tmp/v2i_cert/*.lean; do cmp "$f" "Solution/$(basename "$f")"; done
 python3 -I specs/checks/gen_entry_v2i_controls.py /tmp/v2i_ctl
 for f in /tmp/v2i_ctl/*.lean; do lake env lean "$f" >/dev/null 2>&1 && echo "$f accepted" || echo "$f rejected"; done
+```
+
+For V2k's demonstration, model and controls:
+
+```text
+mkdir -p /tmp/v2k_demo && python3 -I specs/checks/sym_reduce_v2k_demo.py /tmp/v2k_demo
+for f in /tmp/v2k_demo/*.lean; do cmp "$f" "Solution/$(basename "$f")"; done
+python3 -I specs/checks/sym_reduce_v2k_model.py
+python3 -I specs/checks/sym_reduce_v2k_controls.py /tmp/v2k_ctl
+for f in /tmp/v2k_ctl/*.lean; do lake env lean "$f" >/dev/null 2>&1 && echo "$f accepted" || echo "$f rejected"; done
 ```
 
 `./verify.sh` builds the project and runs Lean Comparator on each config in `Comparator/`.

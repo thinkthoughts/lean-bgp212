@@ -23,3 +23,4 @@ import BGP212.PowerSumPlace
 import BGP212.GenEntry
 import BGP212.GenEntryBlock
 import BGP212.MomentAgg
+import BGP212.SymReduce
