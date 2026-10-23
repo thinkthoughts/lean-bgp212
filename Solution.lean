@@ -74,3 +74,12 @@ import Solution.SymStagedDemo4
 import Solution.SymStagedDemo5
 import Solution.SymStagedDemo6
 import Solution.SymStagedSuite
+import Solution.SymTrie
+import Solution.SymTrieNodes
+import Solution.SymTrieDemo1
+import Solution.SymTrieDemo2
+import Solution.SymTrieDemo3
+import Solution.SymTrieDemo4
+import Solution.SymTrieDemo5
+import Solution.SymTrieDemo6
+import Solution.SymTrieSuite
