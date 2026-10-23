@@ -2,8 +2,8 @@
 
 **Working paper:** *Exact Rational Integration over Constrained Simplices*
 **Project:** [translatepi.ai](https://translatepi.ai/) · [Lean repository](https://github.com/thinkthoughts/lean-bgp212)
-**Baseline:** V2j, [implementation commit `a9a8af9`](https://github.com/thinkthoughts/lean-bgp212/commit/a9a8af9), building on V2i [proof commit `a994d73`](https://github.com/thinkthoughts/lean-bgp212/commit/a994d73) and [VPS verification/provenance commit `486cf85`](https://github.com/thinkthoughts/lean-bgp212/commit/486cf85).
-**Verification:** V2i completed the full **21/21 VPS Comparator regression**, including its **33-statement** Challenge/Solution suite. The final suite reported `Lean default kernel accepts the solution` and `Your solution is okay!`; `verify.sh` finished with **exit status 0**. The VPS run was logged to `/tmp/bgp212-v2i-full.log`. V2j additionally compiled on the MacBook Pro and its 24-statement Comparator configuration was accepted on both the MacBook Pro and Linux VPS. The Mac used a development substitute for Linux `landrun`, whereas the VPS used its native Linux verification setup. Earlier verification results remain documented below.
+**Baseline:** V2k, [proof commit `a2cb149`](https://github.com/thinkthoughts/lean-bgp212/commit/a2cb149) and [verification provenance `2b351cd`](https://github.com/thinkthoughts/lean-bgp212/commit/2b351cd), following V2j, [implementation commit `a9a8af9`](https://github.com/thinkthoughts/lean-bgp212/commit/a9a8af9), building on V2i [proof commit `a994d73`](https://github.com/thinkthoughts/lean-bgp212/commit/a994d73) and [VPS verification/provenance commit `486cf85`](https://github.com/thinkthoughts/lean-bgp212/commit/486cf85).
+**Verification:** V2i completed the full **21/21 VPS Comparator regression**, including its **33-statement** Challenge/Solution suite. The final suite reported `Lean default kernel accepts the solution` and `Your solution is okay!`; `verify.sh` finished with **exit status 0**. The VPS run was logged to `/tmp/bgp212-v2i-full.log`. V2j additionally compiled on the MacBook Pro and its 24-statement Comparator configuration was accepted on both the MacBook Pro and Linux VPS. The Mac used a development substitute for Linux `landrun`, whereas the VPS used its native Linux verification setup. V2k additionally passed its 36-statement Comparator configuration on both machines, with a separate memory-limited VPS degree-10 demonstration build. Earlier verification results remain documented below.
 **Purpose:** Inventory the central mathematical statements for the paper, with source locations and explicit scope. These are independent formalization results motivated by the bounded-prime-gap argument; the unconditional bound is not claimed here.
 
 ## 1. Exact simplex moments
@@ -385,6 +385,39 @@ The general closed form reproduces V2h's separately certified $J_T[P_2,P_2]$ exa
 
 **Scope.** V2j proves correctness of moment reuse and coefficient aggregation for the specified representation. It does not yet evaluate the full $846\times846$ marginal Gram matrix, determine the optimized polynomial $P^\star$, establish the final variational positivity certificate, or yield an unconditional proof of $H_1\le212$.
 
+## 14. Symmetric-function reduction of marginal Gram entries (V2k)
+
+**Lean:** `Solution/SymReduce.lean`, `Solution/SymReduceDemo1.lean` through `Solution/SymReduceDemo3.lean`, `Solution/SymReduceSuite.lean`  
+**Definitions:** `BGP212/SymReduce.lean`  
+**Challenge and Comparator:** `Challenge/SymReduce.lean`, `Comparator/sym_reduce_v2k.json`  
+**Specification, model, demonstrations and controls:** `Exploratory/V2k/SPEC.md`, `specs/checks/sym_reduce_v2k_model.py`, `specs/checks/sym_reduce_v2k_demo.py`, `specs/checks/sym_reduce_v2k_controls.py`  
+**Result record:** `specs/results/V2k_sym_reduce.yaml`
+
+**Canonical symmetric-function states.** V2k replaces V2i's recursive enumeration of distinguished-coordinate placements with a canonical combination of *augmented monomial symmetric functions*. Each state contains a partition of positive exponents for each of the three coordinate classes. For class power sums, multiplication uses the exact transition
+
+$$
+p_{c,a}\,\widetilde m_{\nu}
+=\sum_j\widetilde m_{\nu+a e_j}+\widetilde m_{\nu\cup(a)},
+$$
+
+with class-size-dependent falling-factorial weights applied to evaluate the moment oracle. Zero-exponent contributions are handled as scalar terms. The unweighted transition coefficients for positive parts are independent of the class sizes (`psTrans_indep`).
+
+**General correctness theorem.** `symPlaceVal_eq` establishes, for every ordered-field coefficient type, every moment oracle `M`, class-size vector `n`, and factor list `φs`,
+
+```lean
+symPlaceVal M n φs = placeVal M n 0 Fin.elim0 Fin.elim0 φs
+```
+
+Thus the new evaluator computes **the same exact expression** as V2i's placement recursion, not merely matching selected numerical examples. `genPieceSym_eq`, `genEntrySym_eq`, and `jT_eq_genEntrySym` transport this equivalence to the general marginal Gram-entry formula. `symPlaceVal_eq_trans` and `placeVal_psTrans` relate the symmetric transitions to Dirichlet-weighted moments. `genPieceWith_eq_table`, `aggTable_eq`, and `genEntryVal_eq_table` produce exact coefficient tables before moment evaluation.
+
+**Kernel-checked demonstrations.** Three demonstration files certify transition tables, agree with V2i at degrees 4 and 6, and use the new evaluator at degrees 8 and 10. The Table 3 piece `(r,k)=(6,3)` reproduces V2i's `gpPP_6_3` and V2j's `agg4_6_3_eq`, while the synthetic entry reproduces V2j's `genEntrySmall_PP`. For `J_T[P_{(2,2)},P_{(2,2)}]` on that **one piece**, a single kernel-checked `genTable` evaluation yields **85 moment coefficients**. Only 21 of those moment values were already certified by V2j; this does **not** establish the numerical value of the full entry.
+
+**Measured evaluation cost (Claude's development container).** For the degree-8 example, V2i's placement evaluation took about 45 seconds versus about 5 seconds for V2k; for degree 10, V2i ran out of memory while V2k took about 19 seconds. On the specified Table 3 piece, all 85 coefficients were generated in approximately 4.9 seconds. These are example-specific resource measurements, not a universal complexity theorem.
+
+**Independent verification.** Proof commit [`a2cb149`](https://github.com/thinkthoughts/lean-bgp212/commit/a2cb149) and [verification-provenance commit `2b351cd`](https://github.com/thinkthoughts/lean-bgp212/commit/2b351cd) are published on `main`. The **36-statement V2k Comparator suite** returned `Your solution is okay!` on both the MacBook Pro and Linux VPS (the latter with real Linux `landrun`). The Mac compiled the three demonstrations and combined suite; on the VPS, the central proof built, but the separate degree-10 demonstration build exited with code 137 on a 3.8 GiB machine without swap. Comparator acceptance on the VPS succeeded despite this memory-limited separate build. The reported proof axioms are `propext`, `Quot.sound`, and `Classical.choice` (no `sorry`).
+
+**Scope.** V2k proves an exact, more efficiently evaluated representation and coefficient-table identities. The full numerical $846\times846$ Gram matrices, an optimized polynomial $P^\star$, the sign of $J_T(P^\star)-4I_T(P^\star)$, and the remaining analytic/variational obligations are not yet established.
+
 ## Formal verification and provenance
 
 - **Source:** [`thinkthoughts/lean-bgp212`](https://github.com/thinkthoughts/lean-bgp212)
@@ -396,6 +429,7 @@ The general closed form reproduces V2h's separately certified $J_T[P_2,P_2]$ exa
 - **V2h:** [proof commit `6cef1f4`](https://github.com/thinkthoughts/lean-bgp212/commit/6cef1f4); [VPS provenance commit `a9b0e0c`](https://github.com/thinkthoughts/lean-bgp212/commit/a9b0e0c).
 - **V2i:** [proof commit `a994d73`](https://github.com/thinkthoughts/lean-bgp212/commit/a994d73); [VPS provenance commit `486cf85`](https://github.com/thinkthoughts/lean-bgp212/commit/486cf85).
 - **V2j:** [implementation commit `a9a8af9`](https://github.com/thinkthoughts/lean-bgp212/commit/a9a8af9); 24-statement Comparator configuration accepted on MacBook Pro and Linux VPS.
+- **V2k:** [proof commit `a2cb149`](https://github.com/thinkthoughts/lean-bgp212/commit/a2cb149); [verification provenance `2b351cd`](https://github.com/thinkthoughts/lean-bgp212/commit/2b351cd); 36-statement Comparator accepted on MacBook Pro and Linux VPS.
 - **Toolchain:** Lean `v4.34.0-rc2`; mathlib pinned at `85e3a25` (see repository result YAML files).
 - **VPS:** V2g regression: 19/19 Comparator suites accepted; V2h full 27-statement Comparator: default-kernel accepted; cumulative 20/20 count not saved. V2i full 33-statement Comparator: default-kernel accepted on VPS, with 21/21 cumulative acceptances and `verify.sh` exit status 0. V2d: four positive/four negative controls; V2e-A: five positive/four negative; V2e-B: five positive/five negative; V2f: four positive/five negative; V2g: two positive/four negative Lean-file controls. Additional V2f/V2g statement-mismatch tests were reported rejected in Claude’s development environment.
 - **Trusted axioms reported for V2d, V2e-A, V2e-B, V2f and V2g:** `propext`, `Quot.sound`, `Classical.choice`.
@@ -405,7 +439,7 @@ The general closed form reproduces V2h's separately certified $J_T[P_2,P_2]$ exa
 
 The following are **outstanding**, not conclusions of this inventory:
 
-1. Evaluating further `J_T` Gram entries: V2i proves the exact representation of every $B_{21}$ entry and evaluates four; V2j aggregates shared moment keys, but the remaining entries still need exact moment tables and scalable evaluation.
+1. Evaluating further `J_T` Gram entries: V2i proves the exact representation of every $B_{21}$ entry and evaluates four; V2j aggregates shared moment keys and V2k proves a canonical symmetric-function evaluator with exact coefficient tables; the remaining entries still need exact moment evaluations and, for larger cases, staged kernel certificates.
 2. Exact optimized polynomial coefficient data and direct positivity certificates.
 3. Remaining analytic/variational hypotheses needed for `DHL[45,2]`.
 
