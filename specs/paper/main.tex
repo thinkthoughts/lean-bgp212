@@ -21,7 +21,7 @@
 \newcommand{\code}[1]{\texttt{#1}}
 \title{Exact Rational Integration over Constrained Simplices\\[4pt]\large Symmetric Polynomial Bases, Marginal Geometry, and Lean 4 Verification}
 \author{Reading Point \texorpdfstring{(\href{https://translatepi.ai/}{translatepi.ai})}{(translatepi.ai)}}
-\date{Draft v0.8 --- 22 October 2026}
+\date{Draft v0.9 --- 22 October 2026}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -42,7 +42,11 @@ exited with status zero. V2j adds a formally checked shared-moment
 aggregation layer: repeated moment evaluations are grouped by keys and
 weighted sums of Gram entries are proved equal to their unaggregated V2i
 expressions. Its 24-statement Comparator configuration was accepted on
-both a macOS development installation and a Linux VPS. These results give
+both a macOS development installation and a Linux VPS. V2k replaces the
+coordinate-placement recursion with a canonical symmetric-function evaluator;
+its equality with V2i is formally proved for every moment oracle, class-size
+vector, and factor list. The 36-statement V2k Comparator suite was accepted
+on the MacBook Pro and Linux VPS. These results give
 exact representations and selected certificates, not an evaluated
 $846\times846$ numerical matrix or the final variational inequality.
 \end{abstract}
@@ -680,7 +684,9 @@ $J_T(P^\star)-4I_T(P^\star)$, and the remaining variational conditions
 are not established here. V2j implements the proposed coefficient aggregation across repeated rational
 moments, with exact equality to the V2i representation as described in
 Section~\ref{sec:v2j}. The next computational targets include more efficient
-moment/cell evaluation and additional matrix entries.
+moment/cell evaluation and additional matrix entries. V2k replaces the
+placement evaluator by a symmetric-function representation, with an exact
+identity back to V2i (Section~\ref{sec:v2k}).
 
 
 \section{Shared-moment aggregation of marginal Gram entries (V2j)}\label{sec:v2j}
@@ -733,6 +739,94 @@ individual demonstrations, followed by the combined suite, all compiled
 successfully. The source revision published to the repository's
 \code{main} branch is
 \href{https://github.com/thinkthoughts/lean-bgp212/commit/a9a8af9}{\code{a9a8af9}}.
+
+\section{Symmetric-function reduction of the placement recursion (V2k)}\label{sec:v2k}
+V2i's placement recursion enumerates ways that successive factors of a
+product of power sums may merge into already selected coordinates or open
+new coordinates. V2k instead stores canonical states indexed by one integer
+partition for each of the three coordinate classes. For a partition $\nu$,
+write $\widetilde m_\nu$ for the augmented monomial symmetric function,
+whose monomials count ordered assignments to distinct coordinates. For a
+positive integer $a$, multiplication by a class power sum is represented by
+\begin{equation}\label{eq:v2k-transition}
+ p_{c,a}\widetilde m_\nu
+ =\sum_{j=1}^{\ell(\nu)}\widetilde m_{\nu+a e_j}
+  +\widetilde m_{\nu\cup(a)}.
+\end{equation}
+The zero-exponent part is handled separately via the factor
+$n_c-\ell(\nu)$, where $n_c$ is the class population. Canonical states
+are combined using exact rational coefficients and balanced normalization.
+
+\begin{theorem}[Equivalence of symmetric and placement evaluation]\label{thm:v2k-sym}
+For every ordered field, arbitrary moment oracle $M$, class sizes $n$,
+and list of class-dependent polynomial factors $\varphi_s$, the symmetric
+function evaluator equals V2i's original placement recursion:
+\[
+ \operatorname{symPlaceVal}(M,n,\varphi_s)
+ =\operatorname{placeVal}(M,n,0,\mathrm{Fin.elim0},
+                  \mathrm{Fin.elim0},\varphi_s).
+\]
+Consequently the V2k piece and entry expressions agree with V2i's,
+and the corresponding marginal Gram-entry identity follows under the
+hypotheses of the V2i theorem.
+\end{theorem}
+\noindent\textbf{Lean:} \code{symPlaceVal\_eq},
+\code{genPieceSym\_eq}, \code{genEntrySym\_eq},
+\code{jT\_eq\_genEntrySym};
+\nolinkurl{Solution/SymReduce.lean}, \nolinkurl{BGP212/SymReduce.lean}.
+The proof establishes the equivalence in general, rather than only for
+sample polynomials.
+
+\paragraph{Transition coefficients and Dirichlet moments.}
+For products of positive-degree class power sums, the transition
+coefficients $R_{\alpha,\nu}$ are independent of the class populations.
+After integrating the augmented states, each component contributes a
+falling-factorial count of distinct coordinate assignments and an exact
+moment of the rough and smooth aggregate degrees:
+\[
+ \int\prod_c p_{c,\alpha_c}
+ =\sum_{\nu}R_{\alpha,\nu}
+  \left(\prod_c (n_c)_{\ell(\nu_c)}\right)
+  \left(\prod_{(c,e)\in\nu} e!\right)
+  M\!\left(|\nu_0|,|\nu_1|+|\nu_2|\right).
+\]
+Here $M$ denotes the specified piece-moment oracle, and the displayed
+identity abbreviates its Dirichlet-weighted polynomial evaluation.
+Theorems \code{psTrans\_indep}, \code{placeVal\_psTrans}, and
+\code{symPlaceVal\_eq\_trans} formalize the coefficient and moment bridges.
+Theorems \code{genPieceWith\_eq\_table}, \code{aggTable\_eq} and
+\code{genEntryVal\_eq\_table} give exact coefficient tables for repeated
+moment keys using a single symmetric evaluation per piece.
+
+\paragraph{Demonstrations and resource scope.}
+Three demonstration files and a combined suite certify small transition
+examples, degrees four and six using both evaluators, and degree eight and
+ten using the symmetric evaluator. At Table~3, piece $(r,k)=(6,3)$,
+the table for $J_T[P_{(2,2)},P_{(2,2)}]$ contains 85 moment coefficients;
+the complete piece is thereby expressed as an exact combination of those
+moments. This is a \emph{coefficient certificate}, not a complete numerical
+evaluation: 64 of the 85 moments remain to be evaluated, and the other
+pieces of that Gram entry remain outstanding. Previously certified V2i and
+V2j values are recovered in kernel-checked examples. In the reported
+development-container benchmarks, degree-eight evaluation decreased from
+45.1 seconds to 4.98 seconds; these timings are observations, not a
+complexity theorem.
+
+\paragraph{Independent verification.}
+The 36-statement Comparator configuration
+\nolinkurl{Comparator/sym_reduce_v2k.json} was accepted on the MacBook Pro
+and on the Linux VPS with native \code{landrun}. The central V2k proof
+module and combined demonstration suite built on the Mac. The VPS also
+compiled the central theorem module; its separate degree-ten demonstration
+build exited with code 137 on a machine with 3.8 GiB of RAM and no swap,
+while the full Comparator suite succeeded. The reported theorem axioms are
+\code{propext}, \code{Quot.sound}, and \code{Classical.choice}.
+\noindent\textbf{Provenance:}
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/a2cb149}{\code{a2cb149}}
+(proof),
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/2b351cd}{\code{2b351cd}}
+(verification record); \nolinkurl{specs/results/V2k_sym_reduce.yaml},
+\nolinkurl{Exploratory/V2k/SPEC.md}.
 
 \section{Verification, limitations, and further mathematics}
 The project uses Lean \code{v4.34.0-rc2} and a pinned Mathlib revision
@@ -787,13 +881,21 @@ The Mac's Comparator setup used a Lean 4.34.0-rc2-compatible
 \code{lean4export}; its non-sandboxing development substitute is distinct
 from Linux landrun isolation. These V2j acceptances are individual suite
 checks, not a newly asserted complete 22-suite regression.
+For V2k, the 36-statement Comparator suite passed independently on
+both the MacBook Pro and the Linux VPS, against source commit
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/a2cb149}{\code{a2cb149}};
+provenance is published at
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/2b351cd}{\code{2b351cd}}.
+The Linux VPS exceeded its memory budget on the standalone degree-ten
+demonstration build, but accepted the full Comparator suite.
 The reported kernel axioms for these developments are
 \code{propext}, \code{Quot.sound}, and \code{Classical.choice}.
 Results and verification scripts are available in
 \href{https://github.com/thinkthoughts/lean-bgp212/tree/main/specs/results}{\code{specs/results}}.
 
-Further work evaluates additional entries using V2i's general representation
-and V2j's exact aggregation, improves the shared-moment and cell computations,
+Further work evaluates additional entries using V2i's general representation,
+V2j's exact aggregation, and V2k's symmetric-state coefficient tables;
+it also improves the shared-moment and cell computations,
 and addresses optimized polynomial
 coefficients, exact variational positivity certificates, and
 remaining analytic hypotheses. The existing Lean development formalizes the
