@@ -10,17 +10,25 @@ This repository develops formal proofs for the exact and combinatorial parts of 
 
 **[Exact Rational Integration over Constrained Simplices — Theorem Inventory](specs/paper/THEOREMS.md)**
 
-Six principal mathematical results, including exact simplex moments,
-the 846-dimensional polynomial basis, general constrained monomial
-integration, rational Gram representations, and the J_T fibre and
-marginal identities.
+The theorem inventory documents exact simplex moments, the 846-dimensional
+polynomial space, general constrained integrals, rational Gram representations,
+marginal-fibre identities, and successive V2f–V2j certificates. Each result
+is linked to its Lean declarations, hypotheses, and verification scope.
 
-Each result is linked to its Lean declaration, mathematical hypotheses,
-and verification status.
+**Verification milestones:** V2i's complete VPS regression accepted **21/21
+Comparator configurations** (including its 33-statement suite; `verify.sh`
+exited with status 0). V2j's **24-statement shared-moment aggregation suite**
+was separately accepted on both Linux VPS and macOS, at source commit
+[`a9a8af9`](https://github.com/thinkthoughts/lean-bgp212/commit/a9a8af9).
+The macOS check used a development replacement for Linux `landrun`; the VPS
+used Linux isolation. These independent V2j suite acceptances do **not**
+constitute a separately recorded complete 22-suite regression.
 
-The repository contains 15 independently verified Comparator suites.
-The unconditional H₁ ≤ 212 argument remains outside the completed
-formalization.
+**Next development:** V2k's symmetric-function evaluator and its general
+equality with V2i have been reported in a development container; independent
+Mac/VPS reproduction and integration into `main` are pending.
+
+The unconditional H₁ ≤ 212 argument remains outside the completed formalization.
 
 ## Scope
 
@@ -372,6 +380,20 @@ The twenty-second pair is V2j (`Challenge/MomentAgg.lean`, `Solution/MomentAgg.l
 - **Covered by Axiom's own Lean certificate, outside this repository:** the sieve
   criterion (Theorem 4.10) and the deduction of Theorem 1.1.
 - **Open, outside the proved scope:** the exact variational certificate of Theorem 11.1.
+
+## Current mathematical scope
+
+V2i proves an exact rational representation of every marginal Gram entry
+for the 846-dimensional `B₂₁` polynomial space. V2j proves that aggregation
+of repeated rational-moment keys preserves those expressions, including
+weighted combinations of generator pairs. Selected Table 3 entries have exact
+kernel-checked certificates. The complete evaluated `846 × 846` matrices,
+optimized polynomial `P⋆`, the variational sign certificate, and an
+unconditional proof of `H₁ ≤ 212` remain outstanding.
+
+See [`Exploratory/V2j/SPEC.md`](Exploratory/V2j/SPEC.md),
+[`Comparator/moment_agg_v2j.json`](Comparator/moment_agg_v2j.json), and
+[`specs/results/V2j_moment_agg.yaml`](specs/results/V2j_moment_agg.yaml).
 
 ## Comparator Verification
 
