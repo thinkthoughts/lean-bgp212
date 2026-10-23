@@ -2,8 +2,8 @@
 
 **Working paper:** *Exact Rational Integration over Constrained Simplices*
 **Project:** [translatepi.ai](https://translatepi.ai/) · [Lean repository](https://github.com/thinkthoughts/lean-bgp212)
-**Baseline:** V2ℓ, [proof commit `8033c48`](https://github.com/thinkthoughts/lean-bgp212/commit/8033c48) and [Linux verification provenance `7ff03bf`](https://github.com/thinkthoughts/lean-bgp212/commit/7ff03bf), extending V2k [proof `a2cb149`](https://github.com/thinkthoughts/lean-bgp212/commit/a2cb149) and [provenance `2b351cd`](https://github.com/thinkthoughts/lean-bgp212/commit/2b351cd).
-**Verification:** V2i completed the **21/21 VPS Comparator regression** with its **33-statement** suite and `verify.sh` exit status 0. V2j's 24-statement and V2k's 36-statement suites were accepted on Mac and Linux VPS; the Mac used non-isolating `fake-landrun.sh`. V2ℓ's central proofs and sequential staged certificate builds succeeded on Mac and VPS. Its **35-statement Comparator** returned `Your solution is okay!` on the Linux VPS with real `landrun`; Mac Comparator acceptance remains unconfirmed in the saved verification record. Earlier results are documented below.
+**Baseline:** V2m, [proof commit `73b5359`](https://github.com/thinkthoughts/lean-bgp212/commit/73b5359) and [merge commit `283b634`](https://github.com/thinkthoughts/lean-bgp212/commit/283b634), following V2ℓ, [proof commit `8033c48`](https://github.com/thinkthoughts/lean-bgp212/commit/8033c48) and [Linux verification provenance `7ff03bf`](https://github.com/thinkthoughts/lean-bgp212/commit/7ff03bf), extending V2k [proof `a2cb149`](https://github.com/thinkthoughts/lean-bgp212/commit/a2cb149) and [provenance `2b351cd`](https://github.com/thinkthoughts/lean-bgp212/commit/2b351cd).
+**Verification:** V2i completed the **21/21 VPS Comparator regression** with its **33-statement** suite and `verify.sh` exit status 0. V2j's 24-statement and V2k's 36-statement suites were accepted on Mac and Linux VPS; the Mac used non-isolating `fake-landrun.sh`. V2ℓ's central proofs and sequential staged certificate builds succeeded on Mac and VPS. Its **35-statement Comparator** returned `Your solution is okay!` on the Linux VPS with real `landrun`; Mac Comparator acceptance remains unconfirmed in the saved verification record. V2m's 265-module certificate build succeeded on Mac and Linux VPS, and its **20-statement Comparator** was accepted by the Lean default kernel on the Linux VPS using real `landrun`; Mac Comparator remains unconfirmed. Earlier results are documented below.
 **Purpose:** Inventory the central mathematical statements for the paper, with source locations and explicit scope. These are independent formalization results motivated by the bounded-prime-gap argument; the unconditional bound is not claimed here.
 
 ## 1. Exact simplex moments
@@ -445,6 +445,31 @@ The list-level theorem `symRun_of_steps` proves that a chain of equalities `symS
 
 **Exploratory scaling target.** Counting over the 846 generators produces 17,381 distinct ordered factor lists but 2,361 degree multisets. Their sorted prefix trie has **2,360 candidate steps per piece**, versus 16,389 without prefix sharing; these are Python enumeration counts, **not** kernel-certified trie coverage. Certifying that trie, evaluating the remaining Table 3 moments, combining weighted profiles for `P⋆`, and sharing runs across pieces remain future development targets.
 
+## 16. Certified prefix-trie evaluation and coefficient tables (V2m)
+
+**Lean:** `Solution/SymTrie.lean`, `Solution/SymTrieNodes.lean`, `Solution/SymTrieKept.lean`, `Solution/SymTrieProfData*.lean`, `Solution/SymTrieTab*.lean`, `Solution/SymTrieDemo1.lean` through `Solution/SymTrieDemo6.lean`, `Solution/SymTrieSuite.lean`; node, step and profile certificates in `Solution/SymTrieCert/`  
+**Definitions:** `BGP212/SymTrie.lean`  
+**Challenge and Comparator:** `Challenge/SymTrie.lean`, `Comparator/sym_trie_v2m.json`  
+**Specification, build and controls:** `Exploratory/V2m/SPEC.md`, `specs/checks/sym_trie_v2m_build.sh`, `specs/checks/sym_trie_v2m_demo.py`, `specs/checks/sym_trie_v2m_controls.py`  
+**Result record:** `specs/results/V2m_sym_trie.yaml`
+
+**Certified trie evaluation.** V2m assembles V2ℓ's reusable step and profile certificates into prefix tries of shifted power-sum factor multisets. The general theorem `trieOK_placeVal` identifies the value at any certified trie node `(Q,L)` with V2i's placement recursion for **every moment oracle** and **every permutation** `Q'` of its factor degrees:
+
+```lean
+TrieOK n g T → (Q, L) ∈ T → Q'.Perm Q →
+  placeVal M n 0 Fin.elim0 Fin.elim0 (psFactors g Q') = symFinal M L
+```
+
+The supporting `trieOK_root`, `trieOK_cons`, and `trieOK_cons_chain` establish certified construction. `profCert_perm`, `profCert_of_trie`, `profCert_of_step`, and `profCert_of_step_chunks` produce reusable moment profiles, including leaves certified from a stored parent without retaining the leaf's full canonical state. `trieProf_table_eq` connects those certified profiles to exact Gram-entry coefficient tables. `table_parts_merge` and `trieProf_table_parts` justify certifying large tables in parts and merging them hierarchically.
+
+**Kernel-certified Table 3 subtree.** At the **single piece** `(r,k)=(6,3)`, class sizes `(6,3,35)` and shift `g=41/625`, V2m certifies **77 non-root nodes** (22 stored states and 55 profile-only leaves), giving **78 certified profiles** including the root. `Tt_covers` establishes coverage of the block `|λ| ≤ 6` and the at-most-two-factor block; `block6_shape` and `short2_shape` check sorting and prefix closure, and `b21_counts` verifies 139 partitions and kept-part lists. The longest certified factor list has six factors (degree 12), and the largest degree demonstrated is **40**, from `[20,20]`.
+
+**Coefficient-table demonstrations.** The trie reproduces V2ℓ's degree-12 statement by definitional equality (`rfl`). On piece `(6,3)`, further kernel-checked tables include a weighted **49-pair block with 231 moment keys**, a **100-pair** sum over `P_{2i}` and `P_{2j}` for `1 ≤ i,j ≤ 10` with **901 keys**, and the degree-40 `J_T[P₂₀,P₂₀]` piece with **523 keys**. These are exact coefficient representations, **not evaluated rational moments** and not full numerical Gram entries.
+
+**Build and independent verification.** Claude's development report records a sequential **265-module** build, at most **3.92 GB** peak resident memory, followed by 20-statement Comparator acceptance and expected positive/negative control outcomes. Independently, the MacBook Pro completed the core and certificate builds (`3103 jobs` for the certificate script); the Linux VPS at source commit [`73b5359`](https://github.com/thinkthoughts/lean-bgp212/commit/73b5359) completed the same certificate build (`3103 jobs`) and reported `Lean default kernel accepts the solution` and `Your solution is okay!` for the **20-statement Comparator** with real `landrun`. V2m was merged into `main` in [`283b634`](https://github.com/thinkthoughts/lean-bgp212/commit/283b634). The Mac Comparator run is not independently confirmed here. Claude reports only `propext`, `Quot.sound`, and `Classical.choice`, with no `sorry`.
+
+**Limits.** The **2,361** factor multisets and **2,360-step** complete trie per piece are exploratory enumeration counts; V2m certifies 77 of those non-root nodes for one piece, not the complete trie. The remaining **2,283 nodes**, other pieces, unevaluated moments, full `846 × 846` matrices, optimized `P⋆`, and variational positivity remain outstanding.
+
 ## Formal verification and provenance
 
 - **Source:** [`thinkthoughts/lean-bgp212`](https://github.com/thinkthoughts/lean-bgp212)
@@ -458,6 +483,7 @@ The list-level theorem `symRun_of_steps` proves that a chain of equalities `symS
 - **V2j:** [implementation commit `a9a8af9`](https://github.com/thinkthoughts/lean-bgp212/commit/a9a8af9); 24-statement Comparator configuration accepted on MacBook Pro and Linux VPS.
 - **V2k:** [proof commit `a2cb149`](https://github.com/thinkthoughts/lean-bgp212/commit/a2cb149); [verification provenance `2b351cd`](https://github.com/thinkthoughts/lean-bgp212/commit/2b351cd); 36-statement Comparator accepted on MacBook Pro and Linux VPS.
 - **V2ℓ:** [proof commit `8033c48`](https://github.com/thinkthoughts/lean-bgp212/commit/8033c48); [Linux verification provenance `7ff03bf`](https://github.com/thinkthoughts/lean-bgp212/commit/7ff03bf); sequential staged builds succeeded on Mac and VPS, 35-statement Comparator accepted on VPS with real `landrun`.
+- **V2m:** [proof commit `73b5359`](https://github.com/thinkthoughts/lean-bgp212/commit/73b5359); [merge commit `283b634`](https://github.com/thinkthoughts/lean-bgp212/commit/283b634); sequential certificate builds passed on Mac and Linux VPS, 20-statement Comparator accepted on VPS with real `landrun`. Separate provenance commit pending confirmation.
 - **Toolchain:** Lean `v4.34.0-rc2`; mathlib pinned at `85e3a25` (see repository result YAML files).
 - **VPS:** V2g regression: 19/19 Comparator suites accepted; V2h full 27-statement Comparator: default-kernel accepted; cumulative 20/20 count not saved. V2i full 33-statement Comparator: default-kernel accepted on VPS, with 21/21 cumulative acceptances and `verify.sh` exit status 0. V2d: four positive/four negative controls; V2e-A: five positive/four negative; V2e-B: five positive/five negative; V2f: four positive/five negative; V2g: two positive/four negative Lean-file controls. Additional V2f/V2g statement-mismatch tests were reported rejected in Claude’s development environment.
 - **Trusted axioms reported for V2d, V2e-A, V2e-B, V2f and V2g:** `propext`, `Quot.sound`, `Classical.choice`.
@@ -467,7 +493,7 @@ The list-level theorem `symRun_of_steps` proves that a chain of equalities `symS
 
 The following are **outstanding**, not conclusions of this inventory:
 
-1. Evaluating further `J_T` Gram entries: V2i proves the exact representation of every $B_{21}$ entry and evaluates four; V2j aggregates shared moment keys, V2k proves a canonical symmetric-function evaluator, and V2ℓ proves staged certificate composition and reusable moment profiles; further numerical entries require exact moment values and expanded staged certifications.
+1. Evaluating further `J_T` Gram entries: V2i proves the exact representation of every $B_{21}$ entry and evaluates four; V2j aggregates shared moment keys, V2k proves a canonical symmetric-function evaluator, V2ℓ proves staged certificate composition and reusable moment profiles, and V2m certifies prefix-trie evaluation plus selected degree-40 coefficient tables; further numerical entries require exact moment values and broader trie coverage.
 2. Exact optimized polynomial coefficient data and direct positivity certificates.
 3. Remaining analytic/variational hypotheses needed for `DHL[45,2]`.
 
