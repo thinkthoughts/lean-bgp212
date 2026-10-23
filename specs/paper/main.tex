@@ -21,7 +21,7 @@
 \newcommand{\code}[1]{\texttt{#1}}
 \title{Exact Rational Integration over Constrained Simplices\\[4pt]\large Symmetric Polynomial Bases, Marginal Geometry, and Lean 4 Verification}
 \author{Reading Point \texorpdfstring{(\href{https://translatepi.ai/}{translatepi.ai})}{(translatepi.ai)}}
-\date{Draft v0.7 --- 22 October 2026}
+\date{Draft v0.8 --- 22 October 2026}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -36,9 +36,14 @@ $J_T[1,1]$, $J_T[P_2,1]$, and $J_T[P_2,P_2]$, completing a
 $2\times 2$ block. The V2i development then proves a general exact rational
 representation for every pair of polynomial generators, with further
 Table~3 certificates and an exact bridge back to the V2h entry.
-Its 33-statement Comparator suite was accepted by the Lean default kernel
-on the VPS. The full regression produced 21 of 21 acceptances and exited
-with status zero. This establishes general representations, not an evaluated
+The V2i 33-statement Comparator suite was accepted by the Lean default
+kernel on the VPS; its full regression produced 21 of 21 acceptances and
+exited with status zero. V2j adds a formally checked shared-moment
+aggregation layer: repeated moment evaluations are grouped by keys and
+weighted sums of Gram entries are proved equal to their unaggregated V2i
+expressions. Its 24-statement Comparator configuration was accepted on
+both a macOS development installation and a Linux VPS. These results give
+exact representations and selected certificates, not an evaluated
 $846\times846$ numerical matrix or the final variational inequality.
 \end{abstract}
 
@@ -672,9 +677,62 @@ The V2i formula covers every pair of generators, whereas compiling an
 entire numerical Gram matrix would require many further exact evaluations.
 The optimized polynomial $P^\star$, the exact sign of
 $J_T(P^\star)-4I_T(P^\star)$, and the remaining variational conditions
-are not established here. The proposed next step is to collect coefficients
-for repeated rational moments across generator pairs before evaluating
-those moments, preserving an exact equality with the V2i formula.
+are not established here. V2j implements the proposed coefficient aggregation across repeated rational
+moments, with exact equality to the V2i representation as described in
+Section~\ref{sec:v2j}. The next computational targets include more efficient
+moment/cell evaluation and additional matrix entries.
+
+
+\section{Shared-moment aggregation of marginal Gram entries (V2j)}\label{sec:v2j}
+V2i gives exact formulas for arbitrary marginal Gram entries, but their
+coordinate-placement expansions can request the same rational moment many
+times. V2j separates the \emph{moment oracle} from the coefficients of those
+requests, making it possible to collect repeated keys before evaluation.
+
+\paragraph{Linearity and locality.}
+For fixed geometric data and generator indices, the V2j evaluation
+\code{genPieceWith} is linear in its moment oracle. The formal development
+also constructs a finite, canonically enumerated collection of keys used by
+the evaluation. If two oracles agree on those keys, the resulting piece
+values agree. These statements justify replacing repeated oracle calls by a
+shared lookup table without changing the exact piece value.
+
+\begin{theorem}[Exact shared-moment aggregation]\label{thm:v2jagg}
+For the V2j coefficient aggregation of a specified finite weighted family
+of generator pairs, the aggregated rational value equals the weighted sum
+of the corresponding unaggregated V2i entry values. Thus collecting
+coefficients of identical moment keys preserves the exact value of the
+weighted marginal Gram expression.
+\end{theorem}
+\noindent\textbf{Lean:} \code{aggEntryVal\_eq}, \code{jT\_weighted\_eq\_agg},
+with supporting piece-level linearity, key-locality, and aggregation lemmas;
+\nolinkurl{Solution/MomentAgg.lean} and \nolinkurl{BGP212/MomentAgg.lean}.
+
+\paragraph{Exact demonstrations and scope.}
+Four staged demonstration modules and their assembly file provide
+kernel-checked rational examples using shared moment tables. The
+corresponding source files are
+\nolinkurl{Solution/MomentAggDemo1.lean} through
+\nolinkurl{Solution/MomentAggDemo4.lean} and
+\nolinkurl{Solution/MomentAggSuite.lean}.
+The specification and reproducibility records are
+\nolinkurl{Exploratory/V2j/SPEC.md},
+\nolinkurl{specs/results/V2j_moment_agg.yaml}, and
+\nolinkurl{specs/checks/moment_agg_v2j_demo.py}.
+Aggregation is an exact evaluation transformation, not by itself an
+asymptotic complexity bound, a certificate for every numerical Gram entry,
+or a certificate for the final variational inequality.
+
+\paragraph{Verification.}
+The \code{Comparator/moment\_agg\_v2j.json} configuration covers 24 theorem
+statements. Its solution was accepted on the Linux VPS and independently
+on the MacBook Pro, each reporting ``Your solution is okay!''; the Mac
+replay used the non-sandboxing \code{fake-landrun.sh} development substitute,
+while the VPS used Linux \code{landrun}. On the Mac, the V2j core and four
+individual demonstrations, followed by the combined suite, all compiled
+successfully. The source revision published to the repository's
+\code{main} branch is
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/a9a8af9}{\code{a9a8af9}}.
 
 \section{Verification, limitations, and further mathematics}
 The project uses Lean \code{v4.34.0-rc2} and a pinned Mathlib revision
@@ -722,14 +780,21 @@ The V2i record and Comparator configuration are
 \nolinkurl{specs/results/V2i_gen_entry.yaml} and
 \nolinkurl{Comparator/gen_entry_v2i.json}. Prior control results and
 exploratory numerical comparisons are distinct from the saved VPS kernel
-acceptances.
+acceptances. For V2j, the 24-statement Comparator configuration was accepted
+on both the VPS and the MacBook Pro against source commit
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/a9a8af9}{\code{a9a8af9}}.
+The Mac's Comparator setup used a Lean 4.34.0-rc2-compatible
+\code{lean4export}; its non-sandboxing development substitute is distinct
+from Linux landrun isolation. These V2j acceptances are individual suite
+checks, not a newly asserted complete 22-suite regression.
 The reported kernel axioms for these developments are
 \code{propext}, \code{Quot.sound}, and \code{Classical.choice}.
 Results and verification scripts are available in
 \href{https://github.com/thinkthoughts/lean-bgp212/tree/main/specs/results}{\code{specs/results}}.
 
-Further work evaluates additional entries using the general V2i representation,
-combines shared rational moments efficiently, and addresses optimized polynomial
+Further work evaluates additional entries using V2i's general representation
+and V2j's exact aggregation, improves the shared-moment and cell computations,
+and addresses optimized polynomial
 coefficients, exact variational positivity certificates, and
 remaining analytic hypotheses. The existing Lean development formalizes the
 \emph{conditional} implication $\mathrm{DHL}[45,2]\Rightarrow H_1\le212$;
