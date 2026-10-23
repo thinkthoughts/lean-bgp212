@@ -21,7 +21,7 @@
 \newcommand{\code}[1]{\texttt{#1}}
 \title{Exact Rational Integration over Constrained Simplices\\[4pt]\large Symmetric Polynomial Bases, Marginal Geometry, and Lean 4 Verification}
 \author{Reading Point \texorpdfstring{(\href{https://translatepi.ai/}{translatepi.ai})}{(translatepi.ai)}}
-\date{Draft v1.0 --- 22 October 2026}
+\date{Draft v1.1 --- 23 October 2026}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -51,7 +51,11 @@ step and chain certificates, factor-order invariance, and reusable moment
 profiles. The 35-statement Comparator suite was independently accepted
 on the Linux VPS at proof commit \code{8033c48}. Staged degree-twelve
 demonstrations represent one Table~3 piece using 231 moment keys, without
-asserting evaluation of all moment values. These results give
+asserting evaluation of all moment values. V2m extends this to a certified
+prefix trie with 77 nonroot nodes and 78 moment profiles, including
+degree-forty coefficient-table examples. Its sequential certificate build
+succeeded on macOS and Linux; the 20-statement Comparator was accepted by
+the Lean default kernel on the Linux VPS. These results give
 exact representations and selected certificates, not an evaluated
 $846\times846$ numerical matrix or the final variational inequality.
 \end{abstract}
@@ -904,6 +908,74 @@ Verification artifacts: \nolinkurl{Comparator/sym_staged_v2l.json},
 \nolinkurl{specs/results/V2l_sym_staged.yaml}, and
 \nolinkurl{Exploratory/V2l/SPEC.md}.
 
+\section{Certified prefix-trie evaluation and coefficient tables (V2m)}\label{sec:v2m}
+V2\ensuremath{\ell} permits certified prefixes to be reused, while the
+sorted factor-multiset trie from the exploratory enumeration provides a
+natural organization for such reuse. V2m checks a specified subtree of this
+construction rather than assuming correctness of the entire exploratory trie.
+The underlying evaluation agrees with V2i's coordinate-placement recursion.
+
+\begin{theorem}[Certified trie-node evaluation]\label{thm:v2m-trie}
+For a certified trie node, the associated symmetric state evaluates to the
+V2i placement value for its factor path and the specified class sizes, for
+any moment oracle. In particular, certified prefix extensions preserve the
+value of the corresponding placement computation; factor-order invariance
+allows a multiset of factors to share a canonical path.
+\end{theorem}
+\noindent\textbf{Lean:} \code{trieOK\_placeVal};
+\nolinkurl{Solution/SymTrie.lean},
+\nolinkurl{BGP212/SymTrie.lean},
+\nolinkurl{Solution/SymTrieNodes.lean}.
+The proof composes V2\ensuremath{\ell}'s certified transitions with the
+V2k/V2i evaluation equivalence. Each recorded profile-only leaf is computed
+from its parent's full canonical symmetric state before the state is reduced
+to an aggregate-degree profile. Thus a profile is an output of a certified
+state calculation, not a generally sufficient state for subsequent
+transitions.
+
+\paragraph{Certified coverage.}
+The V2m certificate covers \textbf{77 nonroot trie nodes} and
+\textbf{78 profiles}, including the root. Of the nonroot nodes,
+22 retain complete symmetric states and 55 are profile-only leaves.
+The selected calculations include six factors of degree two (total degree
+12), degree-twenty factors and their product (total degree 40), and
+reproduction of the earlier degree-twelve profile table by Lean reduction.
+The Table~3 examples use the single cardinality piece $(r,k)=(6,3)$,
+whose three coordinate-class sizes are $(6,3,35)$.
+
+\paragraph{Exact coefficient tables.}
+The demonstrated certificates provide, among other examples, a
+231-key moment profile for a six-factor degree-twelve block, a
+901-key profile for selected pairs of even power sums, and a
+523-key coefficient profile for a $P_{20}$-by-$P_{20}$ piece.
+These are exact rational coefficients of \emph{unevaluated} geometric
+moments; they are not claims of numerical values for the corresponding
+complete marginal Gram entries. In the larger Table~3 calculation, the
+certificate system checks 79,553 stored coefficient entries, with chunked
+proofs to limit per-module resource requirements.
+
+\paragraph{Independent verification and provenance.}
+The central V2m proofs and staged certificate suite compiled on macOS and
+on the Linux VPS, the latter reporting
+``Build completed successfully (3103 jobs).'' The \textbf{20-statement}
+Comparator configuration \nolinkurl{Comparator/sym_trie_v2m.json} returned
+``Lean default kernel accepts the solution'' and
+``Your solution is okay!'' on the VPS with real Linux \code{landrun}.
+The independently tested source commit is
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/73b5359}{\code{73b5359}};
+it was merged into \code{main} by
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/283b634}{\code{283b634}}.
+The verification record is
+\nolinkurl{specs/results/V2m_sym_trie.yaml}; Mac Comparator acceptance is
+not independently confirmed. Build instructions, controls, and the
+reproducible exploratory generator are in
+\nolinkurl{specs/checks/sym_trie_v2m_build.sh},
+\nolinkurl{specs/checks/sym_trie_v2m_controls.py}, and
+\nolinkurl{specs/checks/sym_trie_v2m_demo.py}.
+The remaining trie nodes, other Table~3 cardinality pieces, full
+$846\times846$ numerical matrices, optimized polynomial $P^\star$, and
+the final variational positivity certificate remain outstanding.
+
 \section{Verification, limitations, and further mathematics}
 The project uses Lean \code{v4.34.0-rc2} and a pinned Mathlib revision
 \code{85e3a25}. At the V2g baseline, all 19 Comparator suites were independently
@@ -970,6 +1042,13 @@ Mac and VPS at source commit
 the 35-statement Comparator passed on Linux with real \code{landrun}.
 Verification provenance is commit
 \href{https://github.com/thinkthoughts/lean-bgp212/commit/7ff03bf}{\code{7ff03bf}}.
+For V2m, both macOS and Linux sequential certificate builds succeeded,
+and the Linux VPS accepted the 20-statement Comparator using native
+\code{landrun}; see the source commit
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/73b5359}{\code{73b5359}},
+merge commit
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/283b634}{\code{283b634}},
+and \nolinkurl{specs/results/V2m_sym_trie.yaml}.
 The reported kernel axioms for these developments are
 \code{propext}, \code{Quot.sound}, and \code{Classical.choice}.
 Results and verification scripts are available in
@@ -977,7 +1056,7 @@ Results and verification scripts are available in
 
 Further work evaluates additional entries using V2i's general representation,
 V2j's exact aggregation, V2k's symmetric-state coefficient tables,
-and V2\ensuremath{\ell}'s staged moment profiles;
+V2\ensuremath{\ell}'s staged moment profiles, and V2m's certified trie tables;
 it also improves the shared-moment and cell computations,
 and addresses optimized polynomial
 coefficients, exact variational positivity certificates, and
