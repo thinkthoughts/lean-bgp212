@@ -71,7 +71,7 @@ result:
   toolchain: leanprover/lean4:v4.34.0-rc2
   mathlib: 85e3a25
   run_date: 2026-10-22
-  commit_hash: PENDING_VPS
+  commit_hash: 8033c48
 
 next_development:
   prefix_trie: "certificates for the 2 360-step prefix trie of one piece of B₂₁, chunked by the measured states per step"
@@ -80,3 +80,20 @@ next_development:
   cross_piece: "share runs across pieces through coefficients polynomial in the class sizes"
 
 footer: Admissible generalizations trail leading specifications.
+
+independent_verification:
+  source_commit: 8033c48
+  macos:
+    core_theorem_build: accepted
+    staged_certificate_build: accepted
+    comparator: "acceptance not yet confirmed in saved output"
+    sandbox: "fake-landrun.sh (no Linux isolation)"
+  linux_vps:
+    staged_certificate_build: accepted
+    comparator: accepted
+    comparator_statements: 35
+    sandbox: "real Linux landrun"
+  conclusion: >
+    The staged degree-12 certificates compiled on both macOS and Linux.
+    The 35-statement Comparator suite was accepted on Linux against
+    source commit 8033c48.
