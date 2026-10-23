@@ -334,6 +334,19 @@ The twenty-first pair is V2i (`Challenge/GenEntry.lean`, `Solution/GenEntry.lean
   `J_T[P_{(2,2)}, 1]`, `J_T[L − P₁, 1]`, and `J_T[P₂, P₂]` recomputed through the general form
   (`genEntryPP_eq_v2h`).
 
+The twenty-second pair is V2j (`Challenge/MomentAgg.lean`, `Solution/MomentAgg.lean`, the demonstration
+`Solution/MomentAggDemo1.lean` … `Demo4.lean`, wrappers in `Solution/MomentAggSuite.lean`, objects in
+`BGP212/MomentAgg.lean`, specification `Exploratory/V2j/SPEC.md`): **shared-moment aggregation**.
+
+- `genPieceWith_listSum`, `genPieceWith_congr`: V2i's piece value is linear in the moment oracle and
+  reads it only at `genKeys` (the queried keys, listed without duplicates).
+- `genPieceWith_eq_keys`: the coefficient collapse `Σ_{s ∈ S} genPieceWith (delta s) · Mo s`.
+- `aggEntryVal_eq`, `jT_weighted_eq_agg`: for a weighted list of generator pairs (the shape of
+  `J_T(P⋆)`), coefficients collected per key across all pairs and each distinct moment evaluated once
+  per piece give `Σ w · J_T[G_{a₁,λ₁}, G_{a₂,λ₂}]`.
+- Demonstration: V2i's certified piece value `gpPP_6_3` recomputed from 19 moments (115 oracle
+  queries), V2i's four entries on that piece from 21 shared keys, and `J_T[P₂, P₂]` on synthetic data.
+
 ## What is proved, imported, and external
 
 - **Proved here, kernel-checked:** Lemma 12.1; the Table 3 parameter layer and every
@@ -350,7 +363,8 @@ The twenty-first pair is V2i (`Challenge/GenEntry.lean`, `Solution/GenEntry.lean
   all three endpoint branches and the marginal Gram entry `J_T[1, 1]` at Table 3 (V2f); the bilinear
   `J_T` form, single-coordinate placement, and the power-sum entry `J_T[P₂, 1]` at Table 3 (V2g);
   two-coordinate placement and the entry `J_T[P₂, P₂]` at Table 3 (V2h); every `J_T` entry of
-  `B₂₁` generators in closed form, with four Table 3 entries evaluated (V2i).
+  `B₂₁` generators in closed form, with four Table 3 entries evaluated (V2i); shared-moment
+  aggregation of weighted sums of entries, proved equal to V2i's closed form (V2j).
 - **Imported analytic hypotheses (taken as hypotheses in Axiom's certificate too):** the
   Type I/II/III equidistribution estimates (Lemmas 5.3–5.7), bilinear Bombieri–Vinogradov
   (Lemma 8.1), and the Harman decomposition (Proposition 7.2). In A4 these are the named

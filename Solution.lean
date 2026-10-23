@@ -54,3 +54,9 @@ import Solution.GenEntryCert13
 import Solution.GenEntryTable
 import Solution.GenEntryCertSum
 import Solution.GenEntry
+import Solution.MomentAgg
+import Solution.MomentAggDemo1
+import Solution.MomentAggDemo2
+import Solution.MomentAggDemo3
+import Solution.MomentAggDemo4
+import Solution.MomentAggSuite

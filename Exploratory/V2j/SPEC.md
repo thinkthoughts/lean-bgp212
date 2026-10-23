@@ -1,0 +1,127 @@
+# V2j: shared-moment evaluation and exact Gram-entry aggregation (specification)
+
+Status: specification, proofs and a kernel demonstration on branch `v2j` (based on the V2i snapshot
+`841dd05` = V2i patch applied to `c22e4dc`). V2i's VPS verification is reported separately; nothing
+here assumes it.
+
+## 1. What V2i exposes
+
+V2i's piece value (`BGP212/GenEntry.lean`)
+
+```text
+genPieceWith N r k g Mo a₁ l₁ a₂ l₂ = Σ_{t₁ ∈ innerTerms a₁ l₁} Σ_{t₂ ∈ innerTerms a₂ l₂}
+    c(t₁) c(t₂) · placeVal (fun A B => Mo A B (p₁+p₂) (q₁+q₂)) (clsCount N r k) 0 ∅ ∅ (factors t₁ t₂)
+```
+
+reads the moment oracle `Mo` only at the leaves of `stateVal`, each multiplied by a rational
+coefficient. Hence it is **linear** in `Mo` and **local**: it depends on `Mo` only at the keys it
+queries. Measured (exact model, any piece):
+
+| entry | oracle queries per piece | distinct keys |
+|---|---|---|
+| J[P₂,P₂] | 115 | 19 |
+| J[P₄,1] | 16 | 10 |
+| J[P_{(2,2)},1] | 115 | 19 |
+| J[L−P₁,1] | 2 | 2 |
+| J[P_{(2,2)},P₂] | 1 471 | 44 |
+| J[(L−P₁)P₂,(L−P₁)P₂] | 460 | 57 |
+| J[P_{(2,2)},P_{(2,2)}] | 20 542 | 85 |
+| the four V2i entries together | 248 | 21 (instead of 19 + 10 + 19 + 2 = 50) |
+
+## 2. Data representation (`BGP212/MomentAgg.lean`)
+
+- `MKey := ℕ × ℕ × ℕ × ℕ` — `(A, B, m, n)`: rough degree, smooth degree, power of `U`, power of
+  `L − S`; the moment is `pieceMn N r k A B g L τ C m n`.
+- `delta s` — the unit oracle at `s`.
+- `stateKeys`, `placeKeys`, `genKeys g a₁ l₁ a₂ l₂` — the keys queried, mirroring the recursions of
+  `stateVal`, `placeVal`, `genPieceWith`; duplicates removed at every level (so the 20 542 queries
+  of `J[P_{(2,2)},P_{(2,2)}]` reduce to 85 keys inside the kernel in under 0.1 s).
+- `genCoeffs N r k g …` — `(s, genPieceWith … (delta s) …)` for `s ∈ genKeys`.
+- `WPair K := K × ℕ × List ℕ × ℕ × List ℕ` — a weighted generator pair `(w, a₁, l₁, a₂, l₂)`.
+- `aggKeys g ws` — the union of keys; `aggCoeff N r k g ws s := Σ_{w ∈ ws} w · genPieceWith … (delta s) …`
+  (coefficients collected across pairs **before** any moment is evaluated).
+- `aggPieceOn S N r k g ws Mo := Σ_{s ∈ S} aggCoeff … s · Mo s` and `aggPiece := aggPieceOn (aggKeys g ws)`;
+  `aggEntryValOn S N g L τ C ws`, `aggEntryVal` — the signed piece sums, as for `genEntryVal`.
+
+V2i's definitions are unchanged; V2j is an evaluation layer with its own correctness theorems.
+
+## 3. Theorems (`Solution/MomentAgg.lean`, all proved)
+
+| theorem | statement |
+|---|---|
+| `stateVal_add`, `stateVal_smul`, `placeVal_add`, `placeVal_smul` | linearity in the oracle |
+| `genPieceWith_add`, `genPieceWith_smul`, `genPieceWith_zero`, `genPieceWith_listSum` | linearity of the piece value |
+| `stateVal_congr`, `placeVal_congr`, `genPieceWith_congr` | locality: oracles agreeing on the queried keys give equal values |
+| `genPieceWith_eq_keys` | for any duplicate-free `S ⊇ genKeys`: `genPieceWith Mo = Σ_{s∈S} genPieceWith (delta s) · Mo s` |
+| `genPieceWith_eq_coeffs` | the same with `genCoeffs` |
+| `aggPieceOn_eq`, `aggPiece_eq` | aggregated piece value = `Σ_{w∈ws} w · genPieceWith` |
+| `aggEntryValOn_eq`, `aggEntryVal_eq` | aggregated entry = `Σ_{w∈ws} w · genEntryVal` |
+| `genPiece_eq_aggPieceOn`, `genEntryVal_eq_aggEntryValOn` | one pair as an aggregated value (term-mode bridges for certificates) |
+| `jT_weighted_eq_agg` | `Σ_{w∈ws} w · J_T[G_{a₁,l₁}, G_{a₂,l₂}] = aggEntryVal N g L τ C ws` (every `N ≥ 1`, admissible data) |
+
+Acceptance: no `sorry`, axioms `propext`, `Quot.sound`, `Classical.choice`; the demonstration
+below reproduces V2i's and V2h's certified values.
+
+## 4. Certificate pattern (measured)
+
+A single `decide +kernel` over a whole aggregated piece exhausts memory (piece `(6, 3)` at Table 3:
+5.88 GB at 54 s; the synthetic `N = 3` entry: 5.88 GB at 41 s); so does direct evaluation of V2i's
+`genPiece` (piece `(6, 3)`: 5.88 GB at 63 s; V2i's synthetic `genEntryVal`: 5.88 GB at 155 s). The
+kernel keeps its intermediate results within one declaration, so evaluation is **staged**, one
+declaration per evaluation:
+
+1. `nd`, `cov`: `S` duplicate-free and covering `genKeys` (`decide +kernel`, about 0.3 s);
+2. `ck_*`: each collapsed coefficient `aggCoeff … s` (`decide +kernel`, about 0.15 s; no moment);
+3. `mo_*`: each distinct moment once (`decide +kernel`, 2.3–12.4 s at Table 3);
+4. `agg_*`: `aggPieceOn S … = v` by rewriting with 2–3 and `norm_num`;
+5. `aggPieceOn_eq` / `aggEntryValOn_eq` give V2i's `genPiece` / `genEntryVal`, applied in term mode
+   through `genPiece_eq_aggPieceOn` / `genEntryVal_eq_aggEntryValOn`. (Rewriting the certificate's
+   goal with `rw [← h]` made the elaborator unfold `genPieceWith` while matching and exhausted memory,
+   5.87 GB at 65 s; the term-mode bridge needs only syntactic matching.)
+6. Each `lean` process accumulates memory across declarations: evaluations and assemblies are
+   kept in separate files.
+
+Demonstration (`Solution/MomentAggDemo1–4.lean`, generated by `specs/checks/moment_agg_v2j_demo.py`):
+
+- piece `(6, 3)` of `J_T[P₂, P₂]` at Table 3: 19 moments (84 s in total), the statement
+  `genPiece 44 6 3 … 0 [2] 0 [2] = …` proved independently of V2h's moment lemmas and identical to
+  V2i's `gpPP_6_3` (`genPiecePP_6_3_same_as_v2i : … = gpPP_6_3 := rfl`); direct evaluation of the
+  same statement (115 moment evaluations) exhausts memory;
+- the four V2i entries on that piece: 21 keys, 2 new moments;
+- synthetic `N = 3`: every piece of `J_T[P₂, P₂]` and the whole entry, equal to V2h's synthetic value
+  and to V2i's `genEntryVal` (`genEntrySmall_PP`).
+
+Relation to V2i's certificate: V2i already evaluated each moment once per piece (`tableFn_eq`), with
+the key list supplied by the generator and correctness checked only by the kernel's final
+evaluation. V2j proves the key list complete (`genPieceWith_congr`), proves the collapse
+(`genPieceWith_eq_keys`), and collects coefficients across any weighted set of pairs.
+
+## 5. Toward `J_T(P⋆) − 4 I_T(P⋆)` (forward plan; not a result)
+
+`P⋆ = Σᵢ cᵢ Gᵢ` and `J_T(P⋆) = Σ_{i,j} cᵢ cⱼ J_T[Gᵢ, Gⱼ]`, which is `aggEntryVal` with
+`ws = [(cᵢ cⱼ, aᵢ, λᵢ, aⱼ, λⱼ)]` (`jT_weighted_eq_agg`). Applied literally that is 846² pairs.
+Two further collapses, measured over all 846 generators of `B₂₁` (exact model):
+
+1. **Inner-term collapse.** The inner integrals `∫₀^U Gᵢ` have 75 419 terms in total but only
+   4 317 distinct `(parts kept, power of U, power of M)`; collect `Σᵢ cᵢ c(tᵢ)` per distinct term
+   first (one exact rational per term).
+2. **Integrand collapse.** Products of two collected terms give 170 657 distinct integrands
+   `W(μ, m, n) = ∫ P̂_μ U^m (L − S)^n` (2 361 multisets `μ`, up to 20 parts).
+
+Then `J_T(P⋆) = (N+1) Σ_pieces Σ_{(μ,m,n)} c(μ,m,n) · W_piece(μ,m,n)`. Obstacle: V2i's placement
+recursion enumerates set partitions of the factors (Bell numbers; 20 parts is out of reach).
+Planned replacement: a **symmetric-function reduction** — expand `P̂_μ(y + s)` in class power sums
+`p_{c,a}`, convert each class to the monomial symmetric basis (transition by integer partitions of
+the degree, at most `p(42) = 53 174` of them), and integrate `m_ν` over a Dirichlet group in closed
+form (`#monomials · ∏ νᵢ! · moment`). Its correctness theorem would be stated against
+`genPieceWith` exactly as V2j's are. `I_T(P⋆)` is V2c's closed form; its collapse is analogous.
+
+## 6. Next level: shared cell integrals (specification)
+
+Inside a piece, every moment `pieceMn … A B m n` is a `cellsVal` at exponents `(r−1+A, N−r−1+B)`, and
+`cellsVal` is a signed combination of `boxVal` over five cells with exponents shifted by the
+binomial expansions. The 15 moments of V2h's `m = 2` table call `boxVal` about 615 times with
+about 140 distinct (cell, exponent) pairs (estimate from V2h). Plan: a `boxVal` oracle version of
+`cellsVal` (`cellsValWith`, equal to `cellsVal` by unfolding), linearity and locality as in §3, and
+coefficients collected per (cell, α, β) across all moments of a piece; certificates then evaluate
+each `boxVal` once.
