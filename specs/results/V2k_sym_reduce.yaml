@@ -70,7 +70,7 @@ result:
   toolchain: leanprover/lean4:v4.34.0-rc2
   mathlib: 85e3a25
   run_date: 2026-10-22
-  commit_hash: PENDING_VPS
+  commit_hash: a2cb149
 
 next_development:
   aggregated_tables: "collect B₂₁'s 4 317 distinct inner terms and 2 361 multisets μ; aggTable per piece across all generator pairs (each μ run once, each moment key once)"
@@ -78,3 +78,22 @@ next_development:
   moments: "V2j §6 boxVal collapse for the moment evaluations; then I_T(P⋆) from V2c"
 
 footer: Admissible generalizations trail leading specifications.
+
+independent_verification:
+  source_commit: a2cb149
+  macos:
+    lean_build: accepted
+    demonstrations: accepted
+    comparator: accepted
+    comparator_statements: 36
+    sandbox: "fake-landrun.sh (no Linux isolation)"
+  linux_vps:
+    core_theorem_build: accepted
+    comparator: accepted
+    comparator_statements: 36
+    sandbox: "real Linux landrun"
+    demo3_build: "exit 137; insufficient RAM (3.8 GiB, no swap)"
+  conclusion: >
+    The same source commit was accepted by Comparator on macOS
+    and Linux. The VPS's separate degree-10 demonstration build
+    exceeded available memory; the Comparator suite passed.
