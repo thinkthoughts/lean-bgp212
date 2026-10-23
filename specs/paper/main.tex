@@ -21,7 +21,7 @@
 \newcommand{\code}[1]{\texttt{#1}}
 \title{Exact Rational Integration over Constrained Simplices\\[4pt]\large Symmetric Polynomial Bases, Marginal Geometry, and Lean 4 Verification}
 \author{Reading Point \texorpdfstring{(\href{https://translatepi.ai/}{translatepi.ai})}{(translatepi.ai)}}
-\date{Draft v0.9 --- 22 October 2026}
+\date{Draft v1.0 --- 22 October 2026}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -46,7 +46,12 @@ both a macOS development installation and a Linux VPS. V2k replaces the
 coordinate-placement recursion with a canonical symmetric-function evaluator;
 its equality with V2i is formally proved for every moment oracle, class-size
 vector, and factor list. The 36-statement V2k Comparator suite was accepted
-on the MacBook Pro and Linux VPS. These results give
+on the MacBook Pro and Linux VPS. V2\ensuremath{\ell} proves staged
+step and chain certificates, factor-order invariance, and reusable moment
+profiles. The 35-statement Comparator suite was independently accepted
+on the Linux VPS at proof commit \code{8033c48}. Staged degree-twelve
+demonstrations represent one Table~3 piece using 231 moment keys, without
+asserting evaluation of all moment values. These results give
 exact representations and selected certificates, not an evaluated
 $846\times846$ numerical matrix or the final variational inequality.
 \end{abstract}
@@ -828,6 +833,77 @@ while the full Comparator suite succeeded. The reported theorem axioms are
 (verification record); \nolinkurl{specs/results/V2k_sym_reduce.yaml},
 \nolinkurl{Exploratory/V2k/SPEC.md}.
 
+
+\section{Staged symmetric-function certificates and reusable profiles (V2\ensuremath{\ell})}\label{sec:v2l}
+V2k's canonical evaluator reduces placement enumeration, but a single
+kernel evaluation of high-degree runs can exhaust memory. V2\ensuremath{\ell}
+decomposes the symmetric run into separately checked transitions and merges.
+Let $L_0=[(\varnothing,1)]$ and let $\varphi_1,\ldots,\varphi_s$
+be class-dependent polynomial factors. A certified step records that the
+normalized transition from $L_{i-1}$ yields $L_i$; for larger states it may
+instead certify individual chunks followed by a checked merge.
+
+\begin{theorem}[Composition of staged placement certificates]\label{thm:v2l-chain}
+For any ordered field, class sizes $n$, factors $\varphi_s$, moment oracle $M$,
+and final state $L$, a certificate
+$\operatorname{ChainCert}(n,\varphi_s,[ (\varnothing,1) ],L)$ implies
+\[
+\operatorname{placeVal}(M,n,0,\mathrm{Fin.elim0},\mathrm{Fin.elim0},\varphi_s)
+=\operatorname{symFinal}(M,L).
+\]
+At the list level, $\operatorname{StepsOK}$ certifies that successive
+normalized transitions compose to the corresponding $\operatorname{symRun}$.
+\end{theorem}
+\noindent\textbf{Lean:} \code{chainCert\_placeVal},
+\code{symRun\_of\_steps}, \code{placeVal\_of\_steps},
+\code{stepCert\_of\_beq}, \code{stepCert\_runs},
+\code{chainCert\_append}, \code{chainCert\_snoc};
+\nolinkurl{Solution/SymStaged.lean}.
+The certificates permit prefix reuse and splitting a large factor step into
+independently checked chunks and a final merge.
+
+\begin{theorem}[Permutation invariance and profile tables]\label{thm:v2l-profile}
+Permutation of the factor list preserves V2i's placement value
+(\code{placeVal\_perm}), as proved from commuting factor operators
+(\code{mOp\_comm}). Certified staged runs or their moment profiles can
+be reused to form exact coefficient tables. Theorems \code{stagedTable\_eq},
+\code{profTable\_eq}, and \code{genPieceWith\_eq\_profTable} identify
+these table expressions with the corresponding unaggregated piece values.
+\end{theorem}
+\noindent\textbf{Lean:} \nolinkurl{Solution/SymPerm.lean},
+\nolinkurl{Solution/SymStaged.lean},
+\nolinkurl{BGP212/SymStaged.lean}.
+A profile groups $\sum\kappa\prod e!$ by the two aggregate degrees
+$(A,B)$; the actual geometric moment oracle remains a separate input.
+
+\paragraph{Degree-twelve demonstrations.}
+Staged files certify six shifted $\widehat P_2$ factors on synthetic data
+and on Table~3 piece $(r,k)=(6,3)$, with class sizes $(6,3,35)$.
+Previously checked V2i and V2k evaluations are reproduced exactly by
+Lean reduction. For the single piece of
+$J_T[P_{(2,2,2)},P_{(2,2,2)}]$, a certified profile table gives an
+explicit linear combination of \textbf{231 moment keys}. The coefficients
+are checked, whereas the remaining geometric moment values and the other
+pieces of this entry still require certificates. The reported development
+build compiled 61 sequential modules, with each module below 4 GB peak
+resident memory; the largest measured 3.95 GB in that environment.
+The exploratory $B_{21}$ enumeration gives 2,361 factor multisets and a
+2,360-step sorted prefix trie per piece, not a certified complete trie.
+
+\paragraph{Independent verification and provenance.}
+The central proofs and sequential degree-twelve certificates compiled on the
+MacBook Pro and the Linux VPS. The \textbf{35-statement} Comparator suite
+was accepted on the Linux VPS with real \code{landrun} against
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/8033c48}{\code{8033c48}};
+the independent Linux verification record is
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/7ff03bf}{\code{7ff03bf}}.
+Mac Comparator acceptance has not been established from the saved output.
+The reported axioms are \code{propext}, \code{Quot.sound} and
+\code{Classical.choice}, with no \code{sorry}.
+Verification artifacts: \nolinkurl{Comparator/sym_staged_v2l.json},
+\nolinkurl{specs/results/V2l_sym_staged.yaml}, and
+\nolinkurl{Exploratory/V2l/SPEC.md}.
+
 \section{Verification, limitations, and further mathematics}
 The project uses Lean \code{v4.34.0-rc2} and a pinned Mathlib revision
 \code{85e3a25}. At the V2g baseline, all 19 Comparator suites were independently
@@ -888,13 +964,20 @@ provenance is published at
 \href{https://github.com/thinkthoughts/lean-bgp212/commit/2b351cd}{\code{2b351cd}}.
 The Linux VPS exceeded its memory budget on the standalone degree-ten
 demonstration build, but accepted the full Comparator suite.
+For V2\ensuremath{\ell}, the staged certificate modules built independently on
+Mac and VPS at source commit
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/8033c48}{\code{8033c48}};
+the 35-statement Comparator passed on Linux with real \code{landrun}.
+Verification provenance is commit
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/7ff03bf}{\code{7ff03bf}}.
 The reported kernel axioms for these developments are
 \code{propext}, \code{Quot.sound}, and \code{Classical.choice}.
 Results and verification scripts are available in
 \href{https://github.com/thinkthoughts/lean-bgp212/tree/main/specs/results}{\code{specs/results}}.
 
 Further work evaluates additional entries using V2i's general representation,
-V2j's exact aggregation, and V2k's symmetric-state coefficient tables;
+V2j's exact aggregation, V2k's symmetric-state coefficient tables,
+and V2\ensuremath{\ell}'s staged moment profiles;
 it also improves the shared-moment and cell computations,
 and addresses optimized polynomial
 coefficients, exact variational positivity certificates, and
