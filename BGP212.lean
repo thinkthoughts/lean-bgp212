@@ -26,3 +26,4 @@ import BGP212.MomentAgg
 import BGP212.SymReduce
 import BGP212.SymStaged
 import BGP212.SymTrie
+import BGP212.SymProfile

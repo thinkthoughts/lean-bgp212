@@ -1,0 +1,81 @@
+# Result record: twenty-sixth Challenge/Solution pair (V2n, direct certified moment-profile transitions)
+
+identity:
+  id: V2n
+  statement: "The moment profile alone does not determine the child's profile under a shifted power sum P̂_q (profile_insufficient, classProfile_insufficient: Lean-checked counterexamples at Table 3, piece (6, 3)). The marked profile of order ≤ T (entries ((A, B, u), κ ∏ e!) for ordered tuples u of distinct parts) is sufficient: one factor maps the marked profile of order ≤ T + 1 of a combination to the marked profile of order ≤ T of its child, entry by entry, without forming the child's states (markProfile_step, for arbitrary class sizes, factors, orders and test functions). Certificates (MarkOK) start from V2m's certified states or trie nodes (markOK_of_chain, markOK_of_chunks, markOK_of_tree, markOK_of_trie), follow direct transitions (markOK_step, markOK_step_chunks, markOK_step_tree), regroup (markOK_congr, markOK_mono) and give V2m's ProfCert (profCert_of_markOK, profCert_of_markStep); V2n's profiles join V2m's ProfOK list (profOK_append) for trieProf_table_eq."
+  source: "Source/bgp212.pdf: Table 3 (p. 39), §9.4, the display of J_T (p. 41), §11 (B₂₁, p. 42)"
+  builds_on: "V2m (TrieOK, ProfOK, stepFactor, Tt_prof, Tt_prof_ok, the certified states Tt_L_* and chains Tt_c_*, trieProf_table_eq, table_parts_merge, blockMultisets, natListMem, trieShapeOK); V2ℓ (ChainCert, ProfCert, abProfile, profTable, mergeAll); V2k (symStep, keyA, keyB, factW, picks, clsCnt); A0–V2m unchanged"
+  base_commits: "V2m 3e6ae72 on the V2j branch; the same Lean and Comparator content as V2m a6f3220 on v2m-main. V2m's independent verification is reported separately and is not assumed here"
+
+state:
+  mathematical: proved
+  computational: kernel-verified demonstration (the block |λ| ≤ 8 at one piece; 25 new multisets)
+  provenance: pinned
+  publication: draft
+
+scope:
+  proved: >
+    markProfile_step (the direct transition, general); markOK_of_chain, markOK_of_chunks, markOK_of_tree,
+    markOK_of_trie (marked profiles from certified states and V2m trie nodes); markOK_step,
+    markOK_step_chunks, markOK_step_tree (direct transitions, chunked, merged in a tree, from higher
+    orders); markOK_mono, markOK_congr (lower orders; regrouping by value); profCert_of_markOK,
+    profCert_of_markStep (to V2m's ProfCert); profOK_append; profile_insufficient,
+    classProfile_insufficient (the obstruction).
+  kernel_certified: >
+    Table 3, piece (6, 3) (clsCount 44 6 3 = (6, 3, 35), g = 41/625): 34 direct nodes (25 multisets of
+    the block |λ| ≤ 8 outside V2m and 9 prefixes), each certified by direct transitions from 8 of V2m's
+    stored nodes with no state of a direct node formed; marked profiles of orders 0–3 (internal nodes
+    21, leaves 13); Tn_prof_ok (34 profiles) and Tn_all_ok (with V2m's 78); Tn_same_as_v2m (the 9 nodes
+    V2m also certified get V2m's profiles exactly); Tn_covers and block8_shape (all 52 multisets of the
+    block |λ| ≤ 8 have certified profiles; sorted and prefix-closed); profile_2x8_direct ([2]^8, degree
+    16, 8 factors). Tables: piece (6, 3) of J_T[P_(2,2,2,2), P_(2,2,2,2)] (489 moments) and
+    Σ cᵢcⱼ J_T[P_λᵢ, P_λⱼ] over the twelve generators with |λ| ≤ 8 (144 pairs, 38 parts, 489 keys).
+  exploratory: >
+    specs/checks/sym_profile_v2n_model.py (random and chain checks of the transition against V2k's
+    symStep); specs/checks/sym_profile_v2n_projection.py (three-factor layer: 1 011 793 direct emitted
+    entries against 1 309 843 staged).
+  representation_note: "Tables are coefficient representations tableVal T Mo = Σ c · Mo s; V2n evaluates no rational moment pieceMn"
+  unproved_assumptions: "none (axioms: propext, Quot.sound, Classical.choice)"
+  outside_V2n: >
+    The remaining 2 258 multisets of B₂₁ at piece (6, 3), the other pieces, the moment values, the
+    846 × 846 matrices, P⋆ and J_T(P⋆) − 4 I_T(P⋆) (Exploratory/V2n/SPEC.md §7).
+
+verification:
+  definitions: BGP212/SymProfile.lean
+  challenge: Challenge/SymProfile.lean
+  solution: [Solution/SymProfile.lean, Solution/SymProfileSplit.lean, Solution/SymProfileProfData.lean, Solution/SymProfileCert/, Solution/SymProfileNodes.lean, "Solution/SymProfileTab*.lean", Solution/SymProfileDemo1.lean, Solution/SymProfileDemo2.lean, Solution/SymProfileDemo4.lean, Solution/SymProfileSuite.lean]
+  comparator_config: Comparator/sym_profile_v2n.json
+  comparator_result: "19 statements accepted by the Lean default kernel, 3 176 s, peak 4.05 GB (1.68 GB heap)"
+  generators: [specs/checks/sym_profile_v2n_demo.py, specs/checks/sym_profile_v2n_model.py, specs/checks/sym_profile_v2n_controls.py, specs/checks/sym_profile_v2n_projection.py, specs/checks/sym_profile_v2n_build.sh]
+  specification: Exploratory/V2n/SPEC.md
+  measurements:
+    progress: "25 new multisets of B₂₁ (block |λ| ≤ 8) with certified profiles at piece (6, 3), by 34 direct nodes (13 leaves, 21 internal; marked orders 0–3) from 8 V2m sources; longest 8 factors, degree 16; 112 certified profiles with V2m's (Tn_all); all 52 multisets of the block covered; 290 252 entries emitted by direct-step checks (at most 1 100 per check)"
+    sequential_build: "737 V2n modules built one lean process at a time from a clean state (specs/checks/sym_profile_v2n_build.sh order), 6 431 s in total; 735 under 4 GB peak (largest 3.98 GB); the two compositions importing every certificate, SymProfileDemo4 and SymProfileSuite, 4.10 and 4.05 GB resident with 0.63 and 0.58 GB heap (the rest memory-mapped .olean data); heap at most 1.40 GB in every module"
+    by_kind: "certificate modules (674): 5 820 s, at most 3.92 GB peak and 1.21 GB heap — Q source profiles 59 (≤ 3.75 GB), S direct steps 333 (≤ 3.92 GB), data 75 (≤ 3.29 GB), M range merges 117 (≤ 3.45 GB), leaf merges 27 (≤ 3.17 GB), assemblies and order-0 profiles 63 (≤ 3.58 GB); tables 53 (≤ 3.98 GB); profile data 3.40 GB"
+    comparison_with_v2m: "for the same 34 nodes the staged route generates 437 831 entries and stores 99 989 states; the direct route emits 290 252 and stores 38 402 marked entries. By target order: leaves 30 137 emitted against 314 670 staged; order 1: 103 777 against 95 468; order 2: 155 780 against 27 552. Sources: 17 470 marked entries against 2 308 states. V2m: 77 nodes, 265 modules, 1 691 s; V2n: 34 nodes, 737 modules, 6 431 s (orders up to 3 chosen to demonstrate multi-level transitions)"
+    projection: "three-factor layer (exploratory, sym_profile_v2n_projection.py): 1 011 793 emitted entries (order-1 marks of 54 two-factor parents 126 012, leaves 885 781) against 1 309 843 staged"
+    memory_note: "peak = maximum resident set of the build (lake + lean), including about 3.0–4.3 GB of memory-mapped Mathlib and project .olean files shared between processes; anon = peak heap memory of the process tree"
+    engineering_notes: "one-piece merges of 6 486 marked entries reached 4.29 GB and range merges filtering all chunk results 4.4 GB; certifying each chunk result as concatenated key-range slices and merging one range per check (markOK_congr with linear_combination) lowered merges to ≤ 3.45 GB; data modules ≤ 2 000 marked entries; tables import the profile data only"
+  axioms_used: [propext, Quot.sound, Classical.choice]
+  trusted_base: "Lean 4 kernel + core + Mathlib (Track B, pinned 85e3a25)"
+  controls:
+    - change: "markProfile_step stated with the parent's marked profile of order T (instead of T + 1) in the Challenge, checked with a configuration naming only markProfile_step"
+      result: "rejected: 'Challenge and solution theorem statement do not match: BGP212.Challenge.markProfile_step'"
+    - change: "kernel controls (specs/checks/sym_profile_v2n_controls.py): the profile of [6, 2] claimed from the order-0 marked profile of [6] (the moment profile alone) by the direct transition; the transition from order ≤ 1 claimed to give V2m's profile of [6, 2] with one coefficient changed; the two states of profile_insufficient claimed to have equal marked profiles of order ≤ 1; [2]^9 claimed covered; the J_T[P_(2,2,2,2), P_(2,2,2,2)] table with one power of U changed"
+      result: "all five rejected by decide +kernel; the positive controls (the transition from order ≤ 1 gives exactly V2m's staged profile of [6, 2]; the two states have equal profiles and different order-1 marked profiles; [2]^8 and [6, 4, 2] covered) accepted"
+    - change: "agreement with V2m and the Python mirror"
+      result: "Tn_same_as_v2m (9 nodes, kernel); the mirror checks every direct node's marked profile against the marked profile of the true child states (V2k's symStep) and the tables against V2k's genTable"
+
+result:
+  toolchain: leanprover/lean4:v4.34.0-rc2
+  mathlib: 85e3a25
+  run_date: 2026-10-23
+  commit_hash: PENDING_VPS
+
+next_development:
+  one_level_hybrid: "V2m's stored states for internal nodes and order-0 direct transitions from order-1 marks for leaves (the cheapest use measured here)"
+  sharper_leaf_marks: "marks restricted to what one factor reads (the first mark and the class counts of the others)"
+  three_factor_layer: "the 150 three-factor nodes of piece (6, 3)"
+  moments: "V2j §6 boxVal collapse; then I_T(P⋆) from V2c"
+
+footer: Admissible generalizations trail leading specifications.

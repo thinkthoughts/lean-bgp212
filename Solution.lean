@@ -83,3 +83,10 @@ import Solution.SymTrieDemo4
 import Solution.SymTrieDemo5
 import Solution.SymTrieDemo6
 import Solution.SymTrieSuite
+import Solution.SymProfile
+import Solution.SymProfileSplit
+import Solution.SymProfileNodes
+import Solution.SymProfileDemo1
+import Solution.SymProfileDemo2
+import Solution.SymProfileDemo4
+import Solution.SymProfileSuite
