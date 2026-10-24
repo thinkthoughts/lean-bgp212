@@ -11,7 +11,7 @@ state:
   mathematical: proved
   computational: kernel-verified demonstration (the block |λ| ≤ 8 at one piece; 25 new multisets)
   provenance: pinned
-  publication: draft
+  publication: published
 
 scope:
   proved: >
@@ -46,6 +46,11 @@ verification:
   solution: [Solution/SymProfile.lean, Solution/SymProfileSplit.lean, Solution/SymProfileProfData.lean, Solution/SymProfileCert/, Solution/SymProfileNodes.lean, "Solution/SymProfileTab*.lean", Solution/SymProfileDemo1.lean, Solution/SymProfileDemo2.lean, Solution/SymProfileDemo4.lean, Solution/SymProfileSuite.lean]
   comparator_config: Comparator/sym_profile_v2n.json
   comparator_result: "19 statements accepted by the Lean default kernel, 3 176 s, peak 4.05 GB (1.68 GB heap)"
+  independent_verification:
+    macos: "Sequential build passed (3763 jobs)"
+    linux_vps: "Sequential build passed (3763 jobs)"
+    linux_comparator: "19 statements accepted by Lean default kernel"
+    verified_source_commit: 335fd08
   generators: [specs/checks/sym_profile_v2n_demo.py, specs/checks/sym_profile_v2n_model.py, specs/checks/sym_profile_v2n_controls.py, specs/checks/sym_profile_v2n_projection.py, specs/checks/sym_profile_v2n_build.sh]
   specification: Exploratory/V2n/SPEC.md
   measurements:
@@ -70,7 +75,8 @@ result:
   toolchain: leanprover/lean4:v4.34.0-rc2
   mathlib: 85e3a25
   run_date: 2026-10-23
-  commit_hash: PENDING_VPS
+  commit_hash: 335fd08
+  merge_commit: 2b172ff
 
 next_development:
   one_level_hybrid: "V2m's stored states for internal nodes and order-0 direct transitions from order-1 marks for leaves (the cheapest use measured here)"
