@@ -1,0 +1,83 @@
+# Result record: twenty-seventh Challenge/Solution pair (V2o, what one factor reads; one-level trie extensions)
+
+identity:
+  id: V2o
+  statement: "For every factor φ of degree ≤ d, all class sizes, combinations and moment oracles, the child's moment profile is computed from the parent's moment profile and the binomial read summary δ_a(A, B, c) = Σ_{marks (c, e)} v (C(e + a, a) − 1), 1 ≤ a ≤ d (readStep_sufficient). The monomial factors x^a read exactly a! (n_c P(A, B) + δ_a(A, B, c)) (monomial_reads, monomial_reads_at), so over a field of characteristic 0 the summary is determined by the children under monomial factors of degree ≤ d (summary_determined): (P, δ₁, …, δ_d) is exactly the information read by factors of degree ≤ d. V2n's two states agree on every factor of degree ≤ 1 and differ under P̂₂ (summary_degree_gap)."
+  source: "Source/bgp212.pdf: Table 3 (p. 39), §9.4, the display of J_T (p. 41), §11 (B₂₁, p. 42)"
+  builds_on: "V2n (markProfile, markStep, markTerms, MarkOK, markProfile_step, markStep_val, markOK_of_tree, markOK_step_tree, profCert_of_markOK, markOK_congr, merge_slices_val, profOK_append, SymProfileProfData); V2m (TrieOK nodes and stored states, Tt_prof, Tt_prof_ok, trieProf_table_eq, shortMultisets, b21Kept_eq, natListMem); V2ℓ (ChainCert, StepCert, stepCert_runs, chainCert_snoc, ProfCert, abProfile, profTable); A0–V2n unchanged"
+  base_commits: "V2n b5b1e20 on the V2j branch; the same Lean and Comparator content as V2n acab402 on v2n-main. V2n's independent verification is reported separately and is not assumed here"
+
+state:
+  mathematical: proved
+  computational: kernel-verified demonstration (66 of the 150 three-factor nodes of one piece)
+  provenance: pinned
+  publication: draft
+
+scope:
+  proved: >
+    readStep_sufficient (sufficiency of the profile and the binomial read summary for every factor of
+    degree ≤ d); monomial_reads, monomial_reads_at (the monomial factors read every coordinate);
+    summary_determined (minimality, characteristic 0); summary_degree_gap (the degree-1 summary
+    suffices for degree ≤ 1 and not for P̂₂); with V2n's profile_insufficient and
+    classProfile_insufficient (the profile and the class counts alone are insufficient).
+  kernel_certified: >
+    Table 3, piece (6, 3) (clsCount 44 6 3 = (6, 3, 35), g = 41/625): all 66 three-factor multisets of
+    B₂₁ of total degree ≤ 26 (of 150 three-factor multisets; three_counts, To_covers), each certified
+    by one direct order-0 transition from its parent's marked profile of order ≤ 1, with no leaf state
+    formed; 35 two-factor parents with certified states (5 V2m stored nodes, 30 staged from V2m's
+    stored one-factor nodes) and marked profiles read from those states; To_prof_ok and To_all_ok
+    (with V2m's 78 profiles); agreement with the 5 V2m and 8 V2n profiles of the same multisets
+    (To_same_v2m_*, To_same_v2n_*); profile_10_8_8_direct; piece (6, 3) of J_T[P_10, P_(8,8)] (574
+    moments). Literal factors To_f_q with bridges To_fe_q : stepFactor g q = To_f_q.
+  exploratory: >
+    specs/checks/sym_read_v2o_cost.py: minimal stored information for the three-factor layer
+    (order-1 marks 38 253, binomial summary 128 800, minimum Σ min(|E|, d) = 30 495; 87.5 % of the
+    21 024 groups have one exponent); leaf kernel work for all 150 leaves (marks route 885 781,
+    summary route 880 546, staged 1 309 843); route comparison for the 66 certified leaves.
+  representation_note: "Tables are coefficient representations tableVal T Mo = Σ c · Mo s; V2o evaluates no rational moment pieceMn"
+  unproved_assumptions: "none (axioms: propext, Quot.sound, Classical.choice)"
+  outside_V2o: >
+    The other 84 three-factor nodes of piece (6, 3) (726 441 leaf entries by this route), the 2 120
+    multisets with four or more factors not yet certified (157 of 2 361 have certified profiles with
+    V2m, V2n and V2o), the other pieces, the moment values, the 846 × 846 matrices, P⋆ and
+    J_T(P⋆) − 4 I_T(P⋆) (Exploratory/V2o/SPEC.md §7).
+
+verification:
+  definitions: BGP212/SymRead.lean
+  challenge: Challenge/SymRead.lean
+  solution: [Solution/SymRead.lean, Solution/SymReadFactors.lean, "Solution/SymReadProfData*.lean", Solution/SymReadCert/, Solution/SymReadNodes.lean, Solution/SymReadTab2.lean, Solution/SymReadDemo1.lean, Solution/SymReadDemo2.lean, Solution/SymReadSuite.lean]
+  comparator_config: Comparator/sym_read_v2o.json
+  comparator_result: "8 statements accepted by the Lean default kernel, 1 621 s, peak 3.68 GB (1.61 GB heap)"
+  generators: [specs/checks/sym_read_v2o_demo.py, specs/checks/sym_read_v2o_controls.py, specs/checks/sym_read_v2o_cost.py, specs/checks/sym_read_v2o_build.sh]
+  specification: Exploratory/V2o/SPEC.md
+  measurements:
+    coverage: "66 three-factor leaves (degree ≤ 26) under 35 parents (30 staged); 159 340 entries emitted by leaf checks (at most 1 500 each); 14 822 generated entries for the staged parents; 25 006 (state, tuple) reads for the parents' marks"
+    sequential_build: "632 V2o modules built one lean process at a time from a clean state (specs/checks/sym_read_v2o_build.sh order), 3 772 s in total; every module under 4 GB peak (largest 3.74 GB; heap at most 1.17 GB), the compositions included (3.67–3.68 GB)"
+    by_kind: "certificate modules (618): 3 634 s — staged steps, states and chains 115 (≤ 3.54 GB), parents' marks, data, range merges and assemblies 182 (≤ 3.74 GB), leaf steps 145 (≤ 3.67 GB), leaf merges, profile checks and assemblies 176 (≤ 3.21 GB); profile data 5 (≤ 3.44 GB); compositions, demonstrations, suite and challenge 6 (≤ 3.68 GB)"
+    literal_factor: "one leaf check of 1 091 emitted entries at q = 10: 215.4 s with stepFactor g 10, 7.4 s with the literal factor (0.83 GB heap in both); chunk heap grows about 0.45 GB per 1 000 emitted entries (1.69 GB at 3 000, 3.03 GB at 6 000)"
+    comparison: "same 66 leaves: V2m staged 14 822 + 242 920 generated entries and 106 661 leaf states; V2n multi-level 43 980 + 159 340 emitted; V2o 14 822 generated + 25 006 reads + 159 340 emitted, no leaf state (−23 % against staged)"
+    memory_note: "peak = maximum resident set of the build (lake + lean), including about 3.0–4.0 GB of memory-mapped .olean data shared between processes; anon = peak heap memory"
+    engineering_notes: "leaf profile data in one module reached 4.65 GB and is split into parts of ≤ 250 KB; a coverage check importing the certificates reached 4.01 GB and imports only the data now; one 13-way conjunction of agreements failed instance synthesis and is one theorem per node"
+  axioms_used: [propext, Quot.sound, Classical.choice]
+  trusted_base: "Lean 4 kernel + core + Mathlib (Track B, pinned 85e3a25)"
+  controls:
+    - change: "readStep_sufficient stated with readSummary (d - 1) in the Challenge, checked with a configuration naming only readStep_sufficient"
+      result: "rejected: 'Challenge and solution theorem statement do not match: BGP212.Challenge.readStep_sufficient'"
+    - change: "kernel controls (specs/checks/sym_read_v2o_controls.py): equal degree-2 summaries claimed for the gap states; the literal coefficients of P̂₂ claimed for P̂₄; the profile of [4, 2, 2] claimed by P̂₄ and claimed from the parent's order-0 entries alone; the step to [2, 2, 2] with one coefficient changed; [10, 10, 10] claimed covered"
+      result: "all six rejected by decide +kernel; the positive controls (equal profiles and degree-1 summaries of the gap states; the bridge for P̂₂; the profile of [4, 2, 2] from order-≤ 1 marks by P̂₂; [10, 8, 8] covered) accepted"
+    - change: "agreement with V2m, V2n and the Python mirror"
+      result: "To_same_v2m_* (5) and To_same_v2n_* (8) in the kernel; the generator checks every leaf profile against the profile of the true child states (V2k's symStep) and the table against V2k's genTable"
+
+result:
+  toolchain: leanprover/lean4:v4.34.0-rc2
+  mathlib: 85e3a25
+  run_date: 2026-10-23
+  commit_hash: PENDING_VPS
+
+next_development:
+  remaining_three_factor: "the 84 three-factor nodes of degree 28–40 of piece (6, 3) by the same route (about 1 000 modules)"
+  adaptive_representation: "per group (A, B, c), store marks or the binomial summary, whichever is smaller (min(|E|, d))"
+  four_factors: "three-factor internal nodes staged or marked, four-factor leaves by one level"
+  moments: "V2j §6 boxVal collapse; then I_T(P⋆) from V2c"
+
+footer: Admissible generalizations trail leading specifications.

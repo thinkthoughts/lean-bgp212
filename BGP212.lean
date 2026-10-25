@@ -27,3 +27,4 @@ import BGP212.SymReduce
 import BGP212.SymStaged
 import BGP212.SymTrie
 import BGP212.SymProfile
+import BGP212.SymRead
