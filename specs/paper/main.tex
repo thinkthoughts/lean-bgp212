@@ -21,43 +21,25 @@
 \newcommand{\code}[1]{\texttt{#1}}
 \title{Exact Rational Integration over Constrained Simplices\\[4pt]\large Symmetric Polynomial Bases, Marginal Geometry, and Lean 4 Verification}
 \author{Reading Point \texorpdfstring{(\href{https://translatepi.ai/}{translatepi.ai})}{(translatepi.ai)}}
-\date{Draft v1.1 --- 23 October 2026}
+\date{Draft v1.2 --- 24 October 2026}
 \begin{document}
 \maketitle
 \begin{abstract}
-We present formally verified integration identities for polynomial weights on
-simplexes constrained by coordinate thresholds and cardinality-dependent caps.
-The development establishes exact simplex moments, a rational polynomial
-subspace of dimension 846, general monomial and ordinary Gram-entry formulas,
-fibre decompositions, two-aggregate Dirichlet integration, and exact
-polygon-cell integrals covering all marginal endpoint branches.
-Kernel-checked rational certificates first establish the marginal entries
-$J_T[1,1]$, $J_T[P_2,1]$, and $J_T[P_2,P_2]$, completing a
-$2\times 2$ block. The V2i development then proves a general exact rational
-representation for every pair of polynomial generators, with further
-Table~3 certificates and an exact bridge back to the V2h entry.
-The V2i 33-statement Comparator suite was accepted by the Lean default
-kernel on the VPS; its full regression produced 21 of 21 acceptances and
-exited with status zero. V2j adds a formally checked shared-moment
-aggregation layer: repeated moment evaluations are grouped by keys and
-weighted sums of Gram entries are proved equal to their unaggregated V2i
-expressions. Its 24-statement Comparator configuration was accepted on
-both a macOS development installation and a Linux VPS. V2k replaces the
-coordinate-placement recursion with a canonical symmetric-function evaluator;
-its equality with V2i is formally proved for every moment oracle, class-size
-vector, and factor list. The 36-statement V2k Comparator suite was accepted
-on the MacBook Pro and Linux VPS. V2\ensuremath{\ell} proves staged
-step and chain certificates, factor-order invariance, and reusable moment
-profiles. The 35-statement Comparator suite was independently accepted
-on the Linux VPS at proof commit \code{8033c48}. Staged degree-twelve
-demonstrations represent one Table~3 piece using 231 moment keys, without
-asserting evaluation of all moment values. V2m extends this to a certified
-prefix trie with 77 nonroot nodes and 78 moment profiles, including
-degree-forty coefficient-table examples. Its sequential certificate build
-succeeded on macOS and Linux; the 20-statement Comparator was accepted by
-the Lean default kernel on the Linux VPS. These results give
-exact representations and selected certificates, not an evaluated
-$846\times846$ numerical matrix or the final variational inequality.
+We formalize exact rational integration of polynomial weights over simplices
+with coordinate thresholds and cardinality-dependent caps. The Lean development
+proves simplex moment identities, general ordinary and marginal Gram-entry
+representations, fibre and polygon-cell reductions, and selected exact rational
+entries in a polynomial space of dimension 846. A canonical symmetric-function
+evaluator, staged certificates, and reusable prefix tries produce exact
+coefficient tables against shared moment oracles. Ordinary aggregate-degree
+profiles, even with class counts, are insufficient for further factor
+transitions; marked profiles provide a general direct-transition identity.
+At a specified Table~3 piece, kernel-checked certificates cover all 52 factor
+multisets of the block $|\lambda|\le8$, including 25 newly covered by direct
+transitions. The V2n certificates build independently on macOS and Linux, and
+the 19-statement Comparator is accepted by the Linux Lean default kernel.
+The resulting coefficient representations do not evaluate the complete
+$846\times846$ matrices or establish the final variational inequality.
 \end{abstract}
 
 \section{Introduction and scope}
@@ -153,7 +135,7 @@ The right-hand side is the explicit, finite expression defined in Lean.
 
 \paragraph{Proof outline.}
 Stratify by the rough-coordinate set, apply inclusion--exclusion to threshold
-conditions, and translate the resulting pieces to weighted simplexes. Use
+conditions, and translate the resulting pieces to weighted simplices. Use
 Theorem~\ref{thm:simplex} and Fubini to evaluate the polynomial weights.
 Placement-counting identities \code{sig\_insert}, \code{sig\_union}, and
 \code{sig\_card} reduce the sums to the finite closed form. The reduction
@@ -976,87 +958,167 @@ The remaining trie nodes, other Table~3 cardinality pieces, full
 $846\times846$ numerical matrices, optimized polynomial $P^\star$, and
 the final variational positivity certificate remain outstanding.
 
+\section{Direct certified marked-profile transitions (V2n)}\label{sec:v2n}
+V2m constructs moment profiles from full canonical symmetric states, retaining
+selected internal trie states for use by descendants. A moment profile records
+the total factorial-weighted coefficient for each pair of aggregate degrees
+$(A,B)$. V2n makes the distinction between an output profile and sufficient
+transition data explicit: Lean counterexamples \code{profile\_insufficient} and
+\code{classProfile\_insufficient} show that neither a moment profile alone nor
+a moment profile supplemented by class counts determines a child's profile
+after multiplication by a shifted power sum $\widehat P_q$.
+
+\paragraph{The obstruction.}
+At Table~3 piece $(6,3)$, the combinations consisting of a part $(0,2)$
+with coefficient $1$ and of two $(0,1)$ parts with coefficient $2$ have
+identical ordinary moment profiles. After multiplication by $\widehat P_2$,
+the resulting profiles take the distinct values $44$ and $40$ at the test
+moment key $(A,B)=(4,0)$. Thus the ordinary profile cannot determine the
+next profile; recording class counts alone does not resolve the ambiguity.
+
+\paragraph{Marked data.}
+For each aggregate-degree pair $(A,B)$ and ordered tuple $u$ of distinct
+marked parts, the order-$T$ marked profile retains the weighted entry
+$((A,B,u),\kappa\prod e!)$, for $|u|\le T$. Here $\kappa$ is the
+coefficient of the underlying canonical state and $\prod e!$ is its
+factorial weight, with marks selecting distinct parts of that state.
+
+\begin{theorem}[Direct marked-profile transition]\label{thm:v2n-step}
+For arbitrary class sizes, shifted-power-sum factors, order $T$, and every
+test function $F$ on marked keys, the weighted sum of $F$ against the
+child's order-$T$ marked profile equals the corresponding weighted sum
+against the direct transition $\operatorname{markStep}$ applied to the
+parent's order-$(T+1)$ marked profile. In particular, these marked data
+suffice for the next evaluated profile without constructing the child's
+canonical symmetric states. This is an equality of tested profile values,
+not an assertion that the two underlying entry lists are identical.
+\end{theorem}
+\noindent\textbf{Lean:} \code{markProfile\_step},
+\code{profile\_insufficient}, \code{classProfile\_insufficient};
+\nolinkurl{BGP212/SymProfile.lean},
+\nolinkurl{Solution/SymProfile.lean},
+\nolinkurl{Challenge/SymProfile.lean}.
+The general transition is an exact algebraic identity, separate from the
+finite coverage demonstrated below.
+
+\paragraph{Certified composition and connection to V2m.}
+Theorems \code{markOK\_of\_chain}, \code{markOK\_of\_chunks},
+\code{markOK\_of\_tree}, and \code{markOK\_of\_trie} construct marked
+certificates from certified states and V2m trie nodes. The
+\code{markOK\_step} family checks direct transitions, including chunked
+and merged computations. Theorems \code{profCert\_of\_markOK} and
+\code{profCert\_of\_markStep} convert the results to V2m's reusable
+\code{ProfCert}; \code{profOK\_append} combines newly certified profiles
+with the earlier list. The resulting coefficient-table identities inherit
+V2m's exact moment-oracle interpretation.
+
+\paragraph{Table~3 demonstration and coverage.}
+At the single piece $(r,k)=(6,3)$, with class sizes $(6,3,35)$ and
+$g=41/625$, 34 direct trie nodes are certified from eight stored V2m
+source nodes. These comprise 25 newly covered factor multisets and nine
+prefixes overlapping V2m. Marked orders zero through three are used,
+with 21 internal nodes and 13 leaves. Theorem \code{Tn\_same\_as\_v2m}
+checks exact agreement for the nine overlapping nodes;
+\code{Tn\_covers} and \code{block8\_shape} establish that all 52
+multisets of the block $|\lambda|\le8$ at this piece have certified
+profiles, with the prescribed sorting and prefix closure. The combined
+list has 112 profiles, including V2m's earlier 78. The degree-sixteen
+factor multiset $[2]^8$ is certified without enumerating its full child
+symmetric-state list.
+
+The coefficient-only demonstrations include the one-piece expression for
+$J_T[P_{(2,2,2,2)},P_{(2,2,2,2)}]$ and a 144-pair block over twelve
+generators with $|\lambda|\le8$; the latter uses 489 moment keys. These
+are \emph{certified coefficients of unevaluated geometric moments}, rather
+than numerical values of complete marginal Gram entries.
+
+\paragraph{Resource measurements and independent verification.}
+For the same 34 nodes, the generator counted 290,252 emitted
+direct-transition entries; it predicts 437,831 entries for the alternative
+staged route, which was not separately built. For leaf transitions, direct
+emission was 30,137 entries versus 314,670 projected staged entries,
+roughly a tenfold reduction; at order one the figures are 103,777 versus
+95,468, while at order two they are 155,780 versus 27,552.
+The V2n approach also required 737 sequential modules in its development
+build, compared with 265 for V2m. These order-dependent costs motivate
+a one-level hybrid; no uniform performance advantage is claimed. The sequential V2n certificate build passed on macOS and on
+the Linux VPS, each reporting 3,763 build jobs. The 19-statement Comparator
+configuration \nolinkurl{Comparator/sym_profile_v2n.json} was accepted
+on Linux using real \code{landrun}, reporting both ``Lean default kernel
+accepts the solution'' and ``Your solution is okay!'' The independently
+verified source commit is
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/335fd08}{\code{335fd08}},
+merged into \code{main} at
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/2b172ff}{\code{2b172ff}}.
+See \nolinkurl{specs/results/V2n_sym_profile.yaml},
+\nolinkurl{Exploratory/V2n/SPEC.md}, and
+\nolinkurl{specs/checks/sym_profile_v2n_build.sh}.
+The Mac Comparator outcome is not claimed here.
+
+\paragraph{Limits.}
+This certificate covers one Table~3 piece, not all 2,361 candidate
+multisets across the other pieces. The remaining 2,258 multisets at piece
+$(6,3)$, the rational moment evaluations, full $846\times846$ numerical
+matrices, optimized polynomial $P^\star$, and the sign of
+$J_T(P^\star)-4I_T(P^\star)$ are not established by V2n.
+A natural next specification is to identify the smaller, factor-dependent
+summary that a single transition reads; any V2o result requires separate
+kernel verification before it can be included as a theorem here.
+
 \section{Verification, limitations, and further mathematics}
-The project uses Lean \code{v4.34.0-rc2} and a pinned Mathlib revision
-\code{85e3a25}. At the V2g baseline, all 19 Comparator suites were independently
-accepted on the VPS. Four positive V2d controls were accepted; four intentionally
-incorrect controls were rejected with unsolved goals. The V2d proof commit is
-\code{52fd36a}; its published verification record is commit
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/90055db}{\code{90055db}}.
-For V2e-A, five positive controls were accepted and four negative controls
-were rejected. The V2e-A proof commit is \code{01644e6}, with VPS
-verification/provenance commit
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/38606c0}{\code{38606c0}}.
-For V2e-B, five positive controls were accepted and five deliberately
-incorrect controls rejected; the V2e-B proof commit is
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/6a21780}{\code{6a21780}},
-with verification/provenance commit
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/25a7376}{\code{25a7376}}.
-For V2f, four positive Lean-file controls were accepted and five negative
-controls rejected. Its proof commit is
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/8c50fb6}{\code{8c50fb6}},
-with VPS provenance commit
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/da0c3fd}{\code{da0c3fd}}.
-For V2g, two positive controls were accepted and four negative controls
-rejected; its 266 certificate lemmas regenerated byte-identically on the
-VPS. The V2g proof commit is
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/ad70abb}{\code{ad70abb}},
-with verification/provenance commit
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/12f8b16}{\code{12f8b16}}.
-For V2h, the 27-statement Comparator accepted the power-sum-square
-certificate on the VPS. Its proof commit is
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/6cef1f4}{\code{6cef1f4}},
-with VPS provenance commit
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/a9b0e0c}{\code{a9b0e0c}}.
-The recorded V2h proof includes 14 rational moment-certificate rows and
-an assembly theorem. The final Comparator acceptance is confirmed; a
-complete 20/20 regression count has not been established from a saved log.
-For V2i, the 33-statement Comparator suite was accepted by the Lean default
-kernel on the VPS. The complete regression log records \textbf{21/21}
-``Your solution is okay!'' messages and the verification script's
-\textbf{exit status 0}. The proof snapshot is
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/a994d73}{\code{a994d73}};
-its separately published VPS provenance commit is
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/486cf85}{\code{486cf85}}.
-The V2i record and Comparator configuration are
-\nolinkurl{specs/results/V2i_gen_entry.yaml} and
-\nolinkurl{Comparator/gen_entry_v2i.json}. Prior control results and
-exploratory numerical comparisons are distinct from the saved VPS kernel
-acceptances. For V2j, the 24-statement Comparator configuration was accepted
-on both the VPS and the MacBook Pro against source commit
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/a9a8af9}{\code{a9a8af9}}.
-The Mac's Comparator setup used a Lean 4.34.0-rc2-compatible
-\code{lean4export}; its non-sandboxing development substitute is distinct
-from Linux landrun isolation. These V2j acceptances are individual suite
-checks, not a newly asserted complete 22-suite regression.
-For V2k, the 36-statement Comparator suite passed independently on
-both the MacBook Pro and the Linux VPS, against source commit
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/a2cb149}{\code{a2cb149}};
-provenance is published at
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/2b351cd}{\code{2b351cd}}.
-The Linux VPS exceeded its memory budget on the standalone degree-ten
-demonstration build, but accepted the full Comparator suite.
-For V2\ensuremath{\ell}, the staged certificate modules built independently on
-Mac and VPS at source commit
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/8033c48}{\code{8033c48}};
-the 35-statement Comparator passed on Linux with real \code{landrun}.
-Verification provenance is commit
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/7ff03bf}{\code{7ff03bf}}.
-For V2m, both macOS and Linux sequential certificate builds succeeded,
-and the Linux VPS accepted the 20-statement Comparator using native
-\code{landrun}; see the source commit
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/73b5359}{\code{73b5359}},
-merge commit
-\href{https://github.com/thinkthoughts/lean-bgp212/commit/283b634}{\code{283b634}},
-and \nolinkurl{specs/results/V2m_sym_trie.yaml}.
-The reported kernel axioms for these developments are
-\code{propext}, \code{Quot.sound}, and \code{Classical.choice}.
-Results and verification scripts are available in
+The project uses Lean \code{v4.34.0-rc2} and pinned Mathlib revision
+\code{85e3a25}. The following table summarizes recorded Comparator checks;
+``VPS'' indicates a Linux kernel acceptance, while ``Mac'' records only
+checks independently reported on macOS. A dash means no corresponding
+acceptance is asserted in this manuscript. Proof and provenance hashes
+identify auditable source and result records.
+\begin{center}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lcllll@{}}
+\hline
+Release & Statements & Mac & Linux VPS & Proof & Provenance\\
+\hline
+V2d & --- & --- & controls & \code{52fd36a} & \code{90055db}\\
+V2e-A & --- & --- & controls & \code{01644e6} & \code{38606c0}\\
+V2e-B & --- & --- & controls & \code{6a21780} & \code{25a7376}\\
+V2f & 18 & --- & accepted & \code{8c50fb6} & \code{da0c3fd}\\
+V2g & 19 & --- & accepted & \code{ad70abb} & \code{12f8b16}\\
+V2h & 27 & --- & accepted & \code{6cef1f4} & \code{a9b0e0c}\\
+V2i & 33 & --- & accepted & \code{a994d73} & \code{486cf85}\\
+V2j & 24 & accepted & accepted & \code{a9a8af9} & ---\\
+V2k & 36 & accepted & accepted & \code{a2cb149} & \code{2b351cd}\\
+V2\ensuremath{\ell} & 35 & build & accepted & \code{8033c48} & \code{7ff03bf}\\
+V2m & 20 & build & accepted & \code{73b5359} & merge \code{283b634}\\
+V2n & 19 & build & accepted & \code{335fd08} & merge \code{2b172ff}\\
+\hline
+\end{tabular}
+\end{center}
+For V2m and V2n, ``build'' denotes successful sequential certificate builds,
+not Mac Comparator acceptance; both Linux Comparator checks used real
+\code{landrun}. V2n's independent builds each completed 3,763 jobs.
+The V2n proof source is \code{335fd08}, its \code{main} merge is
+\code{2b172ff}, and verification details are recorded in
+\nolinkurl{specs/results/V2n_sym_profile.yaml}.
+
+\paragraph{Controls and qualification.}
+Earlier suites used independently expected positive and intentionally false
+negative controls. The recorded counts for V2d, V2e-A, V2e-B, V2f, and V2g
+are respectively $4/4$, $5/4$, $5/5$, $4/5$, and $2/4$ accepted/rejected;
+V2g also regenerated 266 certificate lemmas byte-identically on the VPS.
+The V2h complete 20-suite regression count was not retained; V2i's full
+regression had 21 of 21 acceptances and exit status zero. The macOS V2j
+Comparator used a non-isolating \code{fake-landrun.sh}; Linux used native
+\code{landrun}. An isolated V2k degree-ten VPS demonstration exceeded its
+memory limit, though its Comparator suite succeeded. V2n's negative and
+positive controls are documented in its result record. The reported Lean
+axioms are \code{propext}, \code{Quot.sound}, and \code{Classical.choice}.
+Results and scripts are available at
 \href{https://github.com/thinkthoughts/lean-bgp212/tree/main/specs/results}{\code{specs/results}}.
 
 Further work evaluates additional entries using V2i's general representation,
 V2j's exact aggregation, V2k's symmetric-state coefficient tables,
-V2\ensuremath{\ell}'s staged moment profiles, and V2m's certified trie tables;
+V2\ensuremath{\ell}'s staged moment profiles, V2m's certified trie tables, and V2n's direct marked-profile transitions;
 it also improves the shared-moment and cell computations,
 and addresses optimized polynomial
 coefficients, exact variational positivity certificates, and
