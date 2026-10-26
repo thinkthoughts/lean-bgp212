@@ -2,8 +2,8 @@
 
 **Working paper:** *Exact Rational Integration over Constrained Simplices*
 **Project:** [translatepi.ai](https://translatepi.ai/) · [Lean repository](https://github.com/thinkthoughts/lean-bgp212)
-**Baseline:** V2n — [proof `335fd08`](https://github.com/thinkthoughts/lean-bgp212/commit/335fd08), [merge `2b172ff`](https://github.com/thinkthoughts/lean-bgp212/commit/2b172ff).
-**Verification:** V2n sequential certificate builds passed on macOS and Linux VPS (3,763 jobs each); the 19-statement Linux Comparator was accepted by the Lean default kernel. Earlier release-specific results are recorded below.
+**Baseline:** V2o — [proof `89b43fa`](https://github.com/thinkthoughts/lean-bgp212/commit/89b43fa), [verification provenance `f779ea7`](https://github.com/thinkthoughts/lean-bgp212/commit/f779ea7), [merge `6a51ba9`](https://github.com/thinkthoughts/lean-bgp212/commit/6a51ba9).
+**Verification:** V2o certificate builds passed on macOS and Linux VPS (3,663 jobs each); the V2o eight-statement Comparator suite was accepted by the Lean default kernel on Linux using `landrun`. Earlier release-specific results are recorded below.
 **Purpose:** Inventory the central mathematical statements for the paper, with source locations and explicit scope. These are independent formalization results motivated by the bounded-prime-gap argument; the unconditional bound is not claimed here.
 
 ## 1. Exact simplex moments
@@ -402,7 +402,7 @@ $$
 
 with class-size-dependent falling-factorial weights applied to evaluate the moment oracle. Zero-exponent contributions are handled as scalar terms. The unweighted transition coefficients for positive parts are independent of the class sizes (`psTrans_indep`).
 
-**General correctness theorem.** `symPlaceVal_eq` establishes, for every field with a linear order used for canonical sorting (the stated Lean assumptions are `[Field K] [LinearOrder K]`, without order-compatibility axioms),, every moment oracle `M`, class-size vector `n`, and factor list `φs`,
+**General correctness theorem.** `symPlaceVal_eq` establishes, for every field with a linear order used for canonical sorting (the stated Lean assumptions are `[Field K] [LinearOrder K]`, without order-compatibility axioms), every moment oracle `M`, class-size vector `n`, and factor list `φs`,
 
 ```lean
 symPlaceVal M n φs = placeVal M n 0 Fin.elim0 Fin.elim0 φs
@@ -490,6 +490,38 @@ The supporting `trieOK_root`, `trieOK_cons`, and `trieOK_cons_chain` establish c
 
 **Limits.** This establishes a reusable direct-profile certificate mechanism and exact coefficient tables for one certified block. It certifies profiles for 25 new factor multisets at this piece; the other **2,258** candidate multisets await certificates. The other pieces, full numerical `846 × 846` Gram matrices, `P⋆`, final variational positivity inequality, and unconditional bound on `H₁` remain outstanding. A subsequent refinement can seek smaller factor-specific summaries of what a single transition reads.
 
+## 18. What one factor reads: binomial summaries and one-level certificates (V2o)
+
+**Lean:** `Solution/SymRead.lean`, `Solution/SymReadFactors.lean`, `Solution/SymReadNodes.lean`, `Solution/SymReadTab2.lean`, `Solution/SymReadDemo1.lean`, `Solution/SymReadDemo2.lean`, `Solution/SymReadSuite.lean`; generated certificates in `Solution/SymReadCert/` and profile data in `Solution/SymReadProfData*.lean`  
+**Definitions:** `BGP212/SymRead.lean`  
+**Challenge and Comparator:** `Challenge/SymRead.lean`, `Comparator/sym_read_v2o.json`  
+**Specification and reproducibility:** `Exploratory/V2o/SPEC.md`, `specs/checks/sym_read_v2o_build.sh`, `specs/checks/sym_read_v2o_demo.py`, `specs/checks/sym_read_v2o_controls.py`, `specs/checks/sym_read_v2o_cost.py`  
+**Result record:** `specs/results/V2o_sym_profile.yaml`
+
+**The mathematical reading point.** V2n proves that marks through order $T+1$ determine the order-$T$ child after one factor; V2o’s leaves use the order-0 case. V2o identifies what a factor of degree at most $d$ actually reads. For parent profile $P(A,B)$ and marks of class $c$, exponent $e$, and weight $v$ at $(A,B)$, define the *binomial read summary*
+
+$$
+\delta_a(A,B,c)=\sum_{(c,e)\ \mathrm{marks\ at}\ (A,B)}v\left(\binom{e+a}{a}-1\right),\qquad 1\le a\le d.
+$$
+
+The identity $(e+a)!/e!-a!=a!(\binom{e+a}{a}-1)$ shows that the transition uses marked exponents only through these summaries and the ordinary parent profile. The class size $n_c$ enters as a given parameter; the count of marked parts is absorbed by the $-1$ in $\delta_a$, so it need not be stored separately.
+
+**Sufficiency and determination.** `readStep_sufficient` proves, for arbitrary class sizes, factor combinations and moment oracles, that every factor $\varphi$ of degree at most $d$ has its child's profile *value* computed from $P$ and $\delta_1,\ldots,\delta_d$ via `readStep`; it does not assert literal equality of intermediate entry lists. `monomial_reads` and `monomial_reads_at` identify the response to the monomial factor $x^a$ in class $c$ at a shifted moment-key indicator oracle:
+
+$$
+ a!\bigl(n_c P(A,B)+\delta_a(A,B,c)\bigr).
+$$
+
+Over a **field of characteristic zero**, `summary_determined` shows that, for combinations with equal ordinary profiles, agreement of children under all monomial factors of degree at most $d$ and all moment oracles forces equality of every $\delta_a$ coordinate. Thus $P$ together with $\delta_1,\ldots,\delta_d$ is sufficient and, *relative to the ordinary profile and these observable transitions*, coordinatewise determined; this is not a claim of minimum implementation storage in all representations. `summary_degree_gap` proves that V2n's two counterexample combinations agree after every factor of degree at most one, for all class sizes and oracles, while their children differ for $\widehat P_2$. Degree-one summaries therefore do not suffice for degree-two factors.
+
+**One-level Table 3 certificates.** On the **single** piece $(r,k)=(6,3)$ with class sizes $(6,3,35)$ and $g=41/625$, V2o certifies all **66 three-factor multisets of total degree $\le26$**, out of 150 three-factor multisets. Each leaf is proved by one direct order-0 transition from the order-1 marks of one of **35 certified two-factor parent states** (5 reused from V2m and 30 staged here); **no canonical leaf state is formed** for the proof. `To_prof_ok`, `To_all_ok`, `To_covers` and `three_counts` certify these profiles and their stated coverage. Five shared profiles agree with V2m and eight with V2n. The demonstration for the single-piece contribution to $J_T[P_{10},P_{(8,8)}]$ supplies a **574-moment-key coefficient table**, not rational evaluations of those moments. With V2m and V2n, **157 of the 2,361 factor multisets** now have certified profiles on this piece.
+
+**Resource comparisons and exploratory compression.** For the same 66 leaves, the V2m staged route would require **257,742 generated entries** and form **106,661 leaf states**; V2o's one-level route performs **199,168 generated entries or state-tuple reads** and forms **zero leaf states**, approximately **23% fewer counted operations**. These are generator-based route counts, not two independently built end-to-end routes. For one 1,091-entry leaf check, the reported development-environment time was **215.4 s** with repeated `stepFactor` expansion versus **7.4 s** with a precomputed literal factor and proved bridge (about 29-fold); this is an example-specific measurement. An exploratory rank calculation gives $\min(|E|,d)$ relevant parameters per marked-exponent group. On the measured three-factor layer, order-1 marks store **38,253** numbers versus an exploratory minimum of **30,495**; a direct binomial-summary representation would store **128,800**, so it is not presently the smaller storage choice.
+
+**Verification and provenance.** Claude's development environment reported **632 sequential V2o modules in 3,772 seconds**, a largest V2o-module resident-memory peak of **3.74 GB**, and one eight-statement Comparator suite acceptance. Independently, the MacBook Pro and Linux VPS each completed the V2o certificate build with **3,663 jobs**. A **direct V2o-only Linux Comparator invocation**, using the configured Linux `landrun` and `lean4export`, exported `Solution.SymReadSuite` and reported **“Lean default kernel accepts the solution”** and **“Your solution is okay!”**. The eight statements were checked **within one suite**, hence one acceptance message rather than eight separate ones. Proof commit [`89b43fa`](https://github.com/thinkthoughts/lean-bgp212/commit/89b43fa), independent-verification provenance [`f779ea7`](https://github.com/thinkthoughts/lean-bgp212/commit/f779ea7), and merge [`6a51ba9`](https://github.com/thinkthoughts/lean-bgp212/commit/6a51ba9) are published on `main`. The reported trusted axioms are `propext`, `Quot.sound`, and `Classical.choice`; no `sorry` is reported. Independent Mac Comparator acceptance is not claimed.
+
+**Limits.** The remaining **84 three-factor multisets** (degrees 28–40) and **2,120 multisets with at least four factors**, totaling **2,204** remaining candidate multisets at this piece, await profile certificates. Other pieces, rational moment evaluation, both full $846\times846$ Gram matrices, an optimized $P^\star$, the variational inequality $J_T(P^\star)-4I_T(P^\star)>0$, and an unconditional proof of $H_1\le212$ are still outstanding. The proposed adaptive marks-or-summary representation and the minimum-storage counts are exploratory, not additional kernel theorems.
+
 ## Formal verification and provenance
 
 - **Source:** [`thinkthoughts/lean-bgp212`](https://github.com/thinkthoughts/lean-bgp212)
@@ -504,7 +536,8 @@ The supporting `trieOK_root`, `trieOK_cons`, and `trieOK_cons_chain` establish c
 - **V2k:** [proof commit `a2cb149`](https://github.com/thinkthoughts/lean-bgp212/commit/a2cb149); [verification provenance `2b351cd`](https://github.com/thinkthoughts/lean-bgp212/commit/2b351cd); 36-statement Comparator accepted on MacBook Pro and Linux VPS.
 - **V2ℓ:** [proof commit `8033c48`](https://github.com/thinkthoughts/lean-bgp212/commit/8033c48); [Linux verification provenance `7ff03bf`](https://github.com/thinkthoughts/lean-bgp212/commit/7ff03bf); sequential staged builds succeeded on Mac and VPS, 35-statement Comparator accepted on VPS with real `landrun`.
 - **V2m:** [proof commit `73b5359`](https://github.com/thinkthoughts/lean-bgp212/commit/73b5359); [merge commit `283b634`](https://github.com/thinkthoughts/lean-bgp212/commit/283b634); sequential certificate builds passed on Mac and Linux VPS, 20-statement Comparator accepted on VPS with real `landrun`. Separate provenance commit pending confirmation.
-- **V2n:** [proof commit `335fd08`](https://github.com/thinkthoughts/lean-bgp212/commit/335fd08); [merge commit `2b172ff`](https://github.com/thinkthoughts/lean-bgp212/commit/2b172ff); 3,763-job certificate builds passed on Mac and Linux VPS, and 19-statement Comparator accepted by the Lean default kernel on VPS. Verification-provenance update is pending publication.
+- **V2n:** [proof commit `335fd08`](https://github.com/thinkthoughts/lean-bgp212/commit/335fd08); [merge commit `2b172ff`](https://github.com/thinkthoughts/lean-bgp212/commit/2b172ff); 3,763-job certificate builds passed on Mac and Linux VPS, and 19-statement Comparator accepted by the Lean default kernel on VPS. Result YAML records the verification.
+- **V2o:** [proof commit `89b43fa`](https://github.com/thinkthoughts/lean-bgp212/commit/89b43fa); [verification provenance `f779ea7`](https://github.com/thinkthoughts/lean-bgp212/commit/f779ea7); [merge commit `6a51ba9`](https://github.com/thinkthoughts/lean-bgp212/commit/6a51ba9); Mac and VPS V2o builds passed (3,663 jobs each); Linux eight-statement Comparator suite accepted by the default kernel with real `landrun` (one suite-level acceptance message).
 
 **Later-release Comparator summary** (Mac build success alone does not establish Mac Comparator acceptance):
 
@@ -516,17 +549,18 @@ The supporting `trieOK_root`, `trieOK_cons`, and `trieOK_cons_chain` establish c
 | V2ℓ | 35 | Unconfirmed | Accepted |
 | V2m | 20 | Unconfirmed | Accepted |
 | V2n | 19 | Unconfirmed | Accepted |
+| V2o | 8 | Unconfirmed | Accepted (one suite) |
 
 - **Toolchain:** Lean `v4.34.0-rc2`; mathlib pinned at `85e3a25` (see repository result YAML files).
 - **Earlier VPS regression and controls (V2g and prior):** V2g regression: 19/19 Comparator suites accepted; V2h full 27-statement Comparator: default-kernel accepted; cumulative 20/20 count not saved. V2i full 33-statement Comparator: default-kernel accepted on VPS, with 21/21 cumulative acceptances and `verify.sh` exit status 0. V2d: four positive/four negative controls; V2e-A: five positive/four negative; V2e-B: five positive/five negative; V2f: four positive/five negative; V2g: two positive/four negative Lean-file controls. Additional V2f/V2g statement-mismatch tests were reported rejected in Claude’s development environment.
-- **Trusted axioms reported across V2d–V2n:** `propext`, `Quot.sound`, `Classical.choice`.
+- **Trusted axioms reported across V2d–V2o:** `propext`, `Quot.sound`, `Classical.choice`.
 - **Result records:** [`specs/results`](https://github.com/thinkthoughts/lean-bgp212/tree/main/specs/results).
 
 ## Beyond the current theorems
 
 The following are **outstanding**, not conclusions of this inventory:
 
-1. Evaluating further `J_T` Gram entries: V2i proves the exact representation of every $B_{21}$ entry and evaluates four; V2j aggregates shared moment keys, V2k proves a canonical symmetric-function evaluator, V2ℓ proves staged certificate composition and reusable moment profiles, V2m certifies prefix-trie evaluation plus selected degree-40 coefficient tables, and V2n certifies direct marked-profile transitions and the 52-multiset `|λ| ≤ 8` block at one piece; further numerical entries require exact moment values and broader certified coverage.
+1. Evaluating further `J_T` Gram entries. §§12–18 establish exact representations, shared-moment aggregation, symmetric-function evaluation, staged and trie certificates, marked-profile transitions, and bounded-degree binomial-read summaries (V2i–V2o). At the specified Table 3 piece, **157 distinct multisets** have certified profiles; additional numerical entries require broader certified coverage and exact rational moment values.
 2. Exact optimized polynomial coefficient data and direct positivity certificates.
 3. Remaining analytic/variational hypotheses needed for `DHL[45,2]`.
 
