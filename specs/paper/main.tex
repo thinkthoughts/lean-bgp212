@@ -21,7 +21,7 @@
 \newcommand{\code}[1]{\texttt{#1}}
 \title{Exact Rational Integration over Constrained Simplices\\[4pt]\large Symmetric Polynomial Bases, Marginal Geometry, and Lean 4 Verification}
 \author{Reading Point \texorpdfstring{(\href{https://translatepi.ai/}{translatepi.ai})}{(translatepi.ai)}}
-\date{Draft v1.2 --- 24 October 2026}
+\date{Draft v1.3 --- 26 October 2026}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -29,17 +29,21 @@ We formalize exact rational integration of polynomial weights over simplices
 with coordinate thresholds and cardinality-dependent caps. The Lean development
 proves simplex moment identities, general ordinary and marginal Gram-entry
 representations, fibre and polygon-cell reductions, and selected exact rational
-entries in a polynomial space of dimension 846. A canonical symmetric-function
-evaluator, staged certificates, and reusable prefix tries produce exact
-coefficient tables against shared moment oracles. Ordinary aggregate-degree
-profiles, even with class counts, are insufficient for further factor
-transitions; marked profiles provide a general direct-transition identity.
-At a specified Table~3 piece, kernel-checked certificates cover all 52 factor
-multisets of the block $|\lambda|\le8$, including 25 newly covered by direct
-transitions. The V2n certificates build independently on macOS and Linux, and
-the 19-statement Comparator is accepted by the Linux Lean default kernel.
-The resulting coefficient representations do not evaluate the complete
-$846\times846$ matrices or establish the final variational inequality.
+entries in a polynomial space of dimension 846. Canonical symmetric functions,
+staged certificates, and reusable prefix tries yield exact coefficient tables
+against shared moment oracles. V2n establishes that ordinary profiles, even
+with class-count enhancements, are insufficient for general one-factor
+transitions, and proves a transition identity using marked profiles. V2o
+identifies the bounded-degree information read by a factor: the parent profile
+and binomial summaries $\delta_1,\ldots,\delta_d$. The summaries are sufficient
+for factors of degree at most $d$, and their coordinates are determined by
+monomial-factor outputs over a characteristic-zero field when the parent
+profiles agree. At one specified Table~3 piece, V2m--V2o together certify
+profiles for 157 of 2,361 factor multisets, including 66 three-factor
+multisets of degree at most 26 added by V2o. V2o's certificate builds pass on
+macOS and Linux; its eight-statement Comparator suite is accepted by the Linux
+Lean default kernel. Evaluating the remaining rational moments, the full
+$846\times846$ Gram matrices, and the final variational inequality is future work.
 \end{abstract}
 
 \section{Introduction and scope}
@@ -749,7 +753,9 @@ $n_c-\ell(\nu)$, where $n_c$ is the class population. Canonical states
 are combined using exact rational coefficients and balanced normalization.
 
 \begin{theorem}[Equivalence of symmetric and placement evaluation]\label{thm:v2k-sym}
-For every ordered field, arbitrary moment oracle $M$, class sizes $n$,
+For every field equipped with a linear order used for canonical sorting
+(the Lean assumptions are \code{[Field K] [LinearOrder K]}, without
+order-compatibility axioms), arbitrary moment oracle $M$, class sizes $n$,
 and list of class-dependent polynomial factors $\varphi_s$, the symmetric
 function evaluator equals V2i's original placement recursion:
 \[
@@ -830,7 +836,8 @@ normalized transition from $L_{i-1}$ yields $L_i$; for larger states it may
 instead certify individual chunks followed by a checked merge.
 
 \begin{theorem}[Composition of staged placement certificates]\label{thm:v2l-chain}
-For any ordered field, class sizes $n$, factors $\varphi_s$, moment oracle $M$,
+For any field equipped with a linear order for canonical sorting (without
+order-compatibility axioms), class sizes $n$, factors $\varphi_s$, moment oracle $M$,
 and final state $L$, a certificate
 $\operatorname{ChainCert}(n,\varphi_s,[ (\varnothing,1) ],L)$ implies
 \[
@@ -1028,20 +1035,23 @@ symmetric-state list.
 
 The coefficient-only demonstrations include the one-piece expression for
 $J_T[P_{(2,2,2,2)},P_{(2,2,2,2)}]$ and a 144-pair block over twelve
-generators with $|\lambda|\le8$; the latter uses 489 moment keys. These
+generators with $|\lambda|\le8$; each using 489 moment keys. These
 are \emph{certified coefficients of unevaluated geometric moments}, rather
 than numerical values of complete marginal Gram entries.
 
 \paragraph{Resource measurements and independent verification.}
 For the same 34 nodes, the generator counted 290,252 emitted
 direct-transition entries; it predicts 437,831 entries for the alternative
-staged route, which was not separately built. For leaf transitions, direct
+staged route and 99,989 stored symmetric states, as projected by the
+Python generator; that staged route was not built for these nodes. For leaf
+transitions, direct
 emission was 30,137 entries versus 314,670 projected staged entries,
 roughly a tenfold reduction; at order one the figures are 103,777 versus
 95,468, while at order two they are 155,780 versus 27,552.
 The V2n approach also required 737 sequential modules in its development
 build, compared with 265 for V2m. These order-dependent costs motivate
-a one-level hybrid; no uniform performance advantage is claimed. The sequential V2n certificate build passed on macOS and on
+a one-level hybrid; no uniform performance advantage is claimed.
+The sequential V2n certificate build passed on macOS and on
 the Linux VPS, each reporting 3,763 build jobs. The 19-statement Comparator
 configuration \nolinkurl{Comparator/sym_profile_v2n.json} was accepted
 on Linux using real \code{landrun}, reporting both ``Lean default kernel
@@ -1056,14 +1066,147 @@ See \nolinkurl{specs/results/V2n_sym_profile.yaml},
 The Mac Comparator outcome is not claimed here.
 
 \paragraph{Limits.}
-This certificate covers one Table~3 piece, not all 2,361 candidate
-multisets across the other pieces. The remaining 2,258 multisets at piece
-$(6,3)$, the rational moment evaluations, full $846\times846$ numerical
+This V2n certificate covers 25 new multisets at Table~3 piece $(6,3)$;
+the other pieces are separate. At the end of V2n, 2,258 candidate
+multisets at that piece still awaited certification; V2o reduces this number further.
+The rational moment evaluations, full $846\times846$ numerical
 matrices, optimized polynomial $P^\star$, and the sign of
 $J_T(P^\star)-4I_T(P^\star)$ are not established by V2n.
-A natural next specification is to identify the smaller, factor-dependent
-summary that a single transition reads; any V2o result requires separate
-kernel verification before it can be included as a theorem here.
+V2o identifies the bounded-degree summary read by one factor and supplies
+separately verified one-level certificates (Section~\ref{sec:v2o}).
+
+
+\section{What one factor reads: binomial summaries and one-level certificates (V2o)}\label{sec:v2o}
+V2n proves that a parent's marks through order $T+1$ determine the
+\emph{evaluated} order-$T$ marked profile of its child after one factor.
+V2o specializes to the order-zero child and asks which information from the
+parent's order-one marks is actually used by a factor of bounded degree.
+
+\paragraph{Binomial read summary.}
+Let $P(A,B)$ be the parent's ordinary factorial-weighted moment profile.
+At an aggregate-degree key $(A,B)$, write $(c,e,v)$ for a marked part of
+class $c$, positive exponent $e$, and weight $v$. For $1\le a\le d$ define
+\begin{equation}\label{eq:v2o-delta}
+ \delta_a(A,B,c)
+ =\sum_{\substack{\text{marked parts }(c,e,v)\\\text{at }(A,B)}}
+   v\left(\binom{e+a}{a}-1\right).
+\end{equation}
+The identity
+\begin{equation}\label{eq:v2o-binomial}
+ \frac{(e+a)!}{e!}-a!
+ =a!\left(\binom{e+a}{a}-1\right)
+\end{equation}
+shows why individual marked exponents enter the transition only through
+these sums. The population $n_c$ of class $c$ remains a given parameter;
+the count of marked parts, previously recorded as separate class-profile
+data, is absorbed by the subtraction of $1$ in~\eqref{eq:v2o-delta}.
+
+\begin{theorem}[Sufficiency of the bounded-degree read summary]\label{thm:v2o-sufficient}
+For arbitrary class sizes, parent state combinations, moment oracles, and
+factors $\varphi$ of degree at most $d$, the \emph{value} of the child's
+ordinary moment profile is computed by \code{readStep} from the parent's
+ordinary profile $P$ and the summary $(\delta_1,\ldots,\delta_d)$.
+This is an identity of evaluations for all specified oracles, rather than
+literal equality of the underlying lists of entries.
+\end{theorem}
+\noindent\textbf{Lean:} \code{readStep\_sufficient};
+\nolinkurl{BGP212/SymRead.lean}, \nolinkurl{Solution/SymRead.lean}.
+
+\begin{theorem}[Monomial readings and determination]\label{thm:v2o-necessary}
+For the monomial factor $x^a$ in class $c$, the response at the indicator
+oracle of the corresponding shifted moment key is
+\begin{equation}\label{eq:v2o-monomial}
+ a!\bigl(n_c P(A,B)+\delta_a(A,B,c)\bigr).
+\end{equation}
+Over a field of characteristic zero, if two parent combinations have the
+same ordinary profile and their children under all monomial factors of
+degree at most $d$ agree for every moment oracle, then their binomial-read
+summaries agree coordinatewise for $1\le a\le d$.
+\end{theorem}
+\noindent\textbf{Lean:} \code{monomial\_reads},
+\code{monomial\_reads\_at}, \code{summary\_determined};
+\nolinkurl{Solution/SymRead.lean}.
+Consequently $(P,\delta_1,\ldots,\delta_d)$ is sufficient, and its summary
+coordinates are determined by these observable transitions \emph{relative
+to a fixed parent profile}. This is a mathematical statement about the
+information read, not a general lower bound on implementation storage.
+The Lean theorem \code{summary\_degree\_gap} further shows that V2n's
+two counterexample states agree after every degree-at-most-one factor, for
+all class sizes and moment oracles, but differ after $\widehat P_2$.
+Degree-one summaries therefore do not suffice for degree-two factors.
+
+\paragraph{One-level certificates at one Table~3 piece.}
+For $(r,k)=(6,3)$, with three class sizes $(6,3,35)$ and shift
+$g=41/625$, V2o certifies \textbf{all 66 three-factor multisets of total
+degree at most 26}, out of 150 three-factor multisets. They descend from
+35 certified two-factor parent states: five V2m stored nodes and 30
+newly staged parents. Each leaf uses one direct order-zero transition from
+its parent's order-one marked profile; \emph{the certificate does not form
+a canonical leaf state}. The exploratory generator also calculates child
+states independently to cross-check the emitted profiles.
+Theorems \code{To\_prof\_ok}, \code{To\_all\_ok}, \code{To\_covers},
+and \code{three\_counts} certify the represented profiles and coverage;
+five shared leaf profiles agree exactly with V2m and eight with V2n.
+The one-piece table for $J_T[P_{10},P_{(8,8)}]$ is a certified linear
+combination of \textbf{574 moment keys}, whose rational moment values have
+not thereby been evaluated. Combining distinct V2m, V2n, and V2o profiles
+gives \textbf{157 of the 2,361 factor multisets} certified at this piece.
+
+\paragraph{Measured and projected costs.}
+For those same 66 leaves, the exploratory staged-route generator counts
+14,822 internal-step entries plus 242,920 leaf entries (257,742 total),
+and projects 106,661 canonical leaf states. The implemented V2o one-level
+route counts 14,822 internal-step entries, 25,006 parent state-tuple reads,
+and 159,340 emitted leaf entries (199,168 total), with no canonical leaf
+states formed. For comparison, the V2n multi-level route counts 43,980 internal entries
+and 159,340 leaf entries for those same 66 leaves, likewise without leaf states.
+This is approximately 23\% fewer \emph{counted operations}
+than the staged projection, not a measured 23\% reduction in total
+execution time. In one 1,091-entry leaf check, precomputed literal
+factor coefficients with a proved equality to \code{stepFactor} reduced
+the measured time from 215.4 to 7.4 seconds, about 29-fold; it is a
+single example, not a universal timing guarantee.
+
+An exploratory rank calculation for marked-exponent set $E$ and degree
+bound $d$ gives $\min(|E|,d)$ independent stored parameters per group.
+On the three-factor layer, order-one marks use 38,253 numbers, against
+a computed rank total of 30,495, whereas storing all binomial summaries
+up to the applicable degrees would use 128,800 numbers. Accordingly the
+binomial summaries identify the mathematical reading information without
+establishing a smaller practical representation for this layer. An
+adaptive choice between marks and summaries remains exploratory.
+
+\paragraph{Verification and provenance.}
+The development report records 632 sequential V2o modules built in 3,772
+seconds, with a largest V2o-module peak resident size of 3.74 GB.
+Independently, the sequential V2o certificate builds completed on macOS
+and the Linux VPS, each reporting \textbf{3,663 jobs}. A direct invocation
+of \nolinkurl{Comparator/sym_read_v2o.json} on Linux with configured real
+\code{landrun} and \code{lean4export} accepted the \emph{one eight-statement
+suite}, exporting \code{Solution.SymReadSuite} and reporting
+``Lean default kernel accepts the solution'' and ``Your solution is okay!''.
+One suite-level acceptance message covers its eight statements; eight
+separate messages are neither expected nor claimed. Mac Comparator
+acceptance has not been separately established. The proof source is
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/89b43fa}{\code{89b43fa}},
+its independent-verification provenance is
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/f779ea7}{\code{f779ea7}},
+and the merge into \code{main} is
+\href{https://github.com/thinkthoughts/lean-bgp212/commit/6a51ba9}{\code{6a51ba9}}.
+Source, controls and measurements are recorded in
+\nolinkurl{Exploratory/V2o/SPEC.md},
+\nolinkurl{specs/checks/sym_read_v2o_build.sh}, and
+\nolinkurl{specs/results/V2o_sym_profile.yaml}. The reported axioms are
+\code{propext}, \code{Quot.sound}, and \code{Classical.choice}, with no
+\code{sorry}.
+
+\paragraph{Limits.}
+The remaining \textbf{84 three-factor} multisets of degrees 28--40 and
+\textbf{2,120 multisets with at least four factors} leave \textbf{2,204}
+uncertified candidate multisets at piece $(6,3)$. The other pieces,
+rational moment evaluations, full $846\times846$ numerical Gram matrices,
+optimized polynomial $P^\star$, exact variational positivity, and an
+unconditional proof of $H_1\le212$ remain outside the certified scope.
 
 \section{Verification, limitations, and further mathematics}
 The project uses Lean \code{v4.34.0-rc2} and pinned Mathlib revision
@@ -1091,15 +1234,21 @@ V2k & 36 & accepted & accepted & \code{a2cb149} & \code{2b351cd}\\
 V2\ensuremath{\ell} & 35 & build & accepted & \code{8033c48} & \code{7ff03bf}\\
 V2m & 20 & build & accepted & \code{73b5359} & merge \code{283b634}\\
 V2n & 19 & build & accepted & \code{335fd08} & merge \code{2b172ff}\\
+V2o & 8 & build & accepted & \code{89b43fa} & \code{f779ea7} (merge \code{6a51ba9})\\
 \hline
 \end{tabular}
 \end{center}
-For V2m and V2n, ``build'' denotes successful sequential certificate builds,
-not Mac Comparator acceptance; both Linux Comparator checks used real
-\code{landrun}. V2n's independent builds each completed 3,763 jobs.
+For V2\ensuremath{\ell}--V2o, ``build'' denotes successful sequential certificate
+builds on macOS, not Mac Comparator acceptance; all four Linux Comparator
+checks used real \code{landrun}. V2n's independent builds each completed 3,763 jobs,
+and V2o's each completed 3,663 jobs.
 The V2n proof source is \code{335fd08}, its \code{main} merge is
 \code{2b172ff}, and verification details are recorded in
-\nolinkurl{specs/results/V2n_sym_profile.yaml}.
+\nolinkurl{specs/results/V2n_sym_profile.yaml}. V2o's proof source is
+\code{89b43fa}, its verification record is \code{f779ea7}, and its
+\code{main} merge is \code{6a51ba9}. The eight-statement Linux
+Comparator accepted its \emph{one} V2o suite; the record is
+\nolinkurl{specs/results/V2o_sym_profile.yaml}.
 
 \paragraph{Controls and qualification.}
 Earlier suites used independently expected positive and intentionally false
@@ -1111,15 +1260,20 @@ regression had 21 of 21 acceptances and exit status zero. The macOS V2j
 Comparator used a non-isolating \code{fake-landrun.sh}; Linux used native
 \code{landrun}. An isolated V2k degree-ten VPS demonstration exceeded its
 memory limit, though its Comparator suite succeeded. V2n's negative and
-positive controls are documented in its result record. The reported Lean
+positive controls are documented in its result record. For V2o, six
+intentionally incorrect kernel checks were rejected, four positive controls
+were accepted, and a statement-level Challenge mismatch was rejected in
+the development environment. Its generator reproduced 629 files byte for
+byte; these tests are separate from the independent Linux Comparator. The reported Lean
 axioms are \code{propext}, \code{Quot.sound}, and \code{Classical.choice}.
 Results and scripts are available at
 \href{https://github.com/thinkthoughts/lean-bgp212/tree/main/specs/results}{\code{specs/results}}.
 
 Further work evaluates additional entries using V2i's general representation,
 V2j's exact aggregation, V2k's symmetric-state coefficient tables,
-V2\ensuremath{\ell}'s staged moment profiles, V2m's certified trie tables, and V2n's direct marked-profile transitions;
-it also improves the shared-moment and cell computations,
+V2\ensuremath{\ell}'s staged moment profiles, V2m's certified trie
+tables, V2n's direct marked-profile transitions, and V2o's bounded-degree
+binomial-read summaries and one-level certificates; it also improves the shared-moment and cell computations,
 and addresses optimized polynomial
 coefficients, exact variational positivity certificates, and
 remaining analytic hypotheses. The existing Lean development formalizes the
