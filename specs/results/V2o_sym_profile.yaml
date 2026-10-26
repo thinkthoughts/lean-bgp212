@@ -11,7 +11,7 @@ state:
   mathematical: proved
   computational: kernel-verified demonstration (66 of the 150 three-factor nodes of one piece)
   provenance: pinned
-  publication: draft
+  publication: verified
 
 scope:
   proved: >
@@ -72,7 +72,12 @@ result:
   toolchain: leanprover/lean4:v4.34.0-rc2
   mathlib: 85e3a25
   run_date: 2026-10-23
-  commit_hash: PENDING_VPS
+  commit_hash: 89b43fa
+  independent_verification:
+    macos: "Sequential certificate build passed (3663 jobs)"
+    linux_vps: "Sequential certificate build passed (3663 jobs)"
+    linux_comparator: "Eight-statement suite accepted by Lean default kernel"
+    verified_source_commit: 89b43fa
 
 next_development:
   remaining_three_factor: "the 84 three-factor nodes of degree 28–40 of piece (6, 3) by the same route (about 1 000 modules)"
