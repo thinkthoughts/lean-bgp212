@@ -24,3 +24,4 @@ import Challenge.SymReduce
 import Challenge.SymStaged
 import Challenge.SymTrie
 import Challenge.SymProfile
+import Challenge.SymRead

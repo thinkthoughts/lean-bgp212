@@ -90,3 +90,8 @@ import Solution.SymProfileDemo1
 import Solution.SymProfileDemo2
 import Solution.SymProfileDemo4
 import Solution.SymProfileSuite
+import Solution.SymRead
+import Solution.SymReadNodes
+import Solution.SymReadDemo1
+import Solution.SymReadDemo2
+import Solution.SymReadSuite
